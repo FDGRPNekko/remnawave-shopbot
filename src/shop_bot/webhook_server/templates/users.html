@@ -8,7 +8,7 @@
     </div>
     <div class="col-auto ms-auto d-print-none">
       <div class="d-flex">
-        <input id="users-search" type="text" class="form-control" placeholder="Поиск по ID или Username..." />
+        <input id="users-search" type="text" class="form-control" placeholder="Поиск по ID или Username..." value="{{ q or '' }}" />
       </div>
     </div>
   </div>
@@ -40,10 +40,10 @@
   </div>
   </div>
 
-<div class="card">
+<div class="card card-compact glass">
   <div class="card-body">
     <div class="table-responsive">
-      <table id="users-table" class="table table-vcenter">
+      <table id="users-table" class="table table-vcenter table-compact">
         <thead>
           <tr>
             <th>Telegram ID</th>
@@ -54,7 +54,7 @@
             <th class="w-1">Действия</th>
           </tr>
         </thead>
-        <tbody id="users-tbody" data-fetch-url="{{ url_for('users_table_partial') }}" data-fetch-interval="10000">
+        <tbody id="users-tbody" data-fetch-url="{{ url_for('users_table_partial', page=current_page, per_page=per_page, q=q) }}" data-fetch-interval="10000">
           {% for user in users %}
           <tr>
             <td class="user-id">{{ user.telegram_id }}</td>
@@ -66,92 +66,59 @@
                 <span class="badge bg-green">Активен</span>
               {% endif %}
             </td>
-            <td>
-              {% if user.user_keys %} {{ user.user_keys | length }} шт. {% else %} 0 {% endif %}
-            </td>
+            <td>{{ user.keys_count or 0 }} шт.</td>
             <td>{{ '%.2f'|format(user.balance or 0) }}</td>
             <td>
               <div class="btn-list">
-                <a class="btn btn-primary btn-sm btn-glass" href="{{ url_for('admin_keys_page') }}?user_id={{ user.telegram_id }}" title="Выдать ключ" aria-label="Выдать ключ">
+                <a class="btn btn-primary btn-xs btn-glass" href="{{ url_for('admin_keys_page') }}?user_id={{ user.telegram_id }}" title="Выдать ключ" aria-label="Выдать ключ">
                   <i class="ti ti-key-plus"></i>
                 </a>
                 <button type="button"
-                        class="btn btn-success btn-sm btn-glass btn-user-balance-sign"
+                        class="btn btn-success btn-xs btn-glass btn-user-balance-sign"
                         data-uid="{{ user.telegram_id }}"
                         data-username="{{ user.username or 'N/A' }}"
                         data-balance="{{ '%.2f'|format(user.balance or 0) }}"
-                        data-referrals='{{ user.referrals|tojson }}'
                         data-sign="+"
                         title="Начислить баланс" aria-label="Начислить баланс">
                   Начислить баланс
                 </button>
                 <button type="button"
-                        class="btn btn-danger btn-sm btn-glass btn-user-balance-sign"
+                        class="btn btn-danger btn-xs btn-glass btn-user-balance-sign"
                         data-uid="{{ user.telegram_id }}"
                         data-username="{{ user.username or 'N/A' }}"
                         data-balance="{{ '%.2f'|format(user.balance or 0) }}"
-                        data-referrals='{{ user.referrals|tojson }}'
                         data-sign="-"
                         title="Списать баланс" aria-label="Списать баланс">
                   Списать баланс
                 </button>
-                <button type="button" class="btn btn-outline-secondary btn-sm btn-glass" data-toggle="keys" data-user="{{ user.telegram_id }}" title="Ключи" aria-label="Ключи">
+                <button type="button" class="btn btn-outline-secondary btn-xs btn-glass" data-toggle="keys" data-user="{{ user.telegram_id }}" title="Ключи" aria-label="Ключи">
                   <i class="ti ti-key"></i>
                 </button>
                 {% if user.is_banned %}
                 <form action="{{ url_for('unban_user_route', user_id=user.telegram_id) }}" method="post">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                  <button type="submit" class="btn btn-success btn-sm btn-glass" title="Разбанить" aria-label="Разбанить"><i class="ti ti-circle-check"></i></button>
+                  <button type="submit" class="btn btn-success btn-xs btn-glass" title="Разбанить" aria-label="Разбанить"><i class="ti ti-circle-check"></i></button>
                 </form>
                 {% else %}
                 <form action="{{ url_for('ban_user_route', user_id=user.telegram_id) }}" method="post" data-confirm="Вы уверены, что хотите забанить этого пользователя? Он не сможет пользоваться ботом.">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                  <button type="submit" class="btn btn-warning btn-sm btn-glass" title="Бан" aria-label="Бан"><i class="ti ti-ban"></i></button>
+                  <button type="submit" class="btn btn-warning btn-xs btn-glass" title="Бан" aria-label="Бан"><i class="ti ti-ban"></i></button>
                 </form>
                 {% endif %}
-                {% if user.user_keys %}
+                {% if (user.keys_count or 0) > 0 %}
                 <form action="{{ url_for('revoke_keys_route', user_id=user.telegram_id) }}" method="post" data-confirm="ВНИМАНИЕ! Это действие удалит ВСЕ ключи пользователя с серверов. Вы уверены?" data-ajax="delete" data-refresh-target="users-tbody" data-action="revoke-keys">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                  <button type="submit" class="btn btn-danger btn-sm btn-glass" title="Отозвать ключи" aria-label="Отозвать ключи"><i class="ti ti-trash-x"></i></button>
+                  <button type="submit" class="btn btn-danger btn-xs btn-glass" title="Отозвать ключи" aria-label="Отозвать ключи"><i class="ti ti-trash-x"></i></button>
                 </form>
                 {% endif %}
               </div>
             </td>
           </tr>
-          <tr class="keys-row" id="keys-{{ user.telegram_id }}" style="display:none;">
+          <tr class="keys-row" id="keys-{{ user.telegram_id }}" style="display:none;" data-src="{{ url_for('user_keys_partial', user_id=user.telegram_id) }}">
             <td colspan="6">
-              <div class="card">
+              <div class="card card-compact">
                 <div class="card-header"><strong>Ключи пользователя</strong></div>
-                <div class="card-body p-2">
-                  {% if user.user_keys %}
-                  <div class="table-responsive">
-                    <table class="table table-sm table-vcenter">
-                      <thead>
-                        <tr>
-                          <th>ID</th>
-                          <th>Хост</th>
-                          <th>Email</th>
-                          <th>UUID</th>
-                          <th>Истекает</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {% for k in user.user_keys %}
-                        <tr>
-                          <td>#{{ k.key_id }}</td>
-                          <td>{{ k.host_name }}</td>
-                          <td>{{ k.key_email }}</td>
-                          <td class="text-truncate" style="max-width:220px">{{ k.remnawave_user_uuid }}</td>
-                          <td>{{ k.expiry_date or '' }}</td>
-                        </tr>
-                        {% endfor %}
-                      </tbody>
-                    </table>
-                  </div>
-                  {% else %}
-                    <div class="text-secondary">Ключей нет</div>
-                  {% endif %}
-                </div>
+                <div class="card-body p-2" data-lazy="keys"></div>
               </div>
             </td>
           </tr>
@@ -161,6 +128,14 @@
     </div>
   </div>
 </div>
+
+{% if total_pages and total_pages > 1 %}
+<div class="d-flex justify-content-center mt-3">
+  <ul id="users-pagination" class="pagination" data-src="{{ url_for('users_pagination_partial', page=current_page, q=q, per_page=per_page) }}">
+    {% include 'partials/users_pagination.html' %}
+  </ul>
+  </div>
+{% endif %}
 
   <script>
   (function(){
@@ -192,6 +167,22 @@
       return Array.from(tbody.children).filter(tr => tr.tagName === 'TR' && !tr.classList.contains('keys-row'));
     }
     function getKeysRowByUid(uid){ return document.getElementById('keys-' + uid); }
+    async function ensureKeysLoaded(uid){
+      const row = getKeysRowByUid(uid);
+      if (!row) return;
+      const body = row.querySelector('[data-lazy="keys"]');
+      if (!body) return;
+      if (body.getAttribute('data-loaded') === '1') return;
+      const src = row.getAttribute('data-src');
+      if (!src) return;
+      try{
+        const resp = await fetch(src, { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' });
+        if (!resp.ok) return;
+        const html = await resp.text();
+        body.innerHTML = html;
+        body.setAttribute('data-loaded','1');
+      } catch(_){ }
+    }
     function openKeysForUid(uid){
       const row = getKeysRowByUid(uid);
       if (!row) return;
@@ -260,6 +251,37 @@
     input.addEventListener('input', applyFilter);
     input.addEventListener('keyup', applyFilter);
     input.addEventListener('search', applyFilter); // для очистки через крестик
+    // Синхронизируем поиск с сервером при паузе ввода (debounce)
+    (function(){
+      let t=null; const DEBOUNCE=400; const tbody=document.getElementById('users-tbody');
+      async function pushQuery(){
+        const q = encodeURIComponent(input.value||'');
+        const url = new URL(tbody.getAttribute('data-fetch-url'), window.location.origin);
+        url.searchParams.set('q', input.value||'');
+        url.searchParams.set('page','1');
+        try{
+          const resp = await fetch(url.toString(), { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' });
+          const html = await resp.text();
+          if (html){ tbody.innerHTML = html; restoreOpenedKeys(); applyFilter(); }
+          // Важно: синхронизируем data-fetch-url с текущим фильтром,
+          // чтобы автообновление не сбрасывало результаты и не скрывало найденного пользователя
+          tbody.setAttribute('data-fetch-url', url.pathname + '?' + url.searchParams.toString());
+          // Перерисуем пагинацию
+          const pag = document.getElementById('users-pagination');
+          if (pag){
+            const purl = new URL(pag.getAttribute('data-src'), window.location.origin);
+            purl.searchParams.set('q', input.value||''); purl.searchParams.set('page','1');
+            const presp = await fetch(purl.toString(), { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' });
+            const phtml = await presp.text(); if (phtml) pag.innerHTML = phtml;
+          }
+          // Обновим адресную строку
+          try {
+            history.replaceState(null,'', '/users?page=1' + (input.value ? ('&q=' + encodeURIComponent(input.value)) : ''));
+          } catch(_){ }
+        } catch(_){ }
+      }
+      input.addEventListener('input', ()=>{ clearTimeout(t); t=setTimeout(pushQuery, DEBOUNCE); });
+    })();
     // При автообновлении tbody — снова применяем фильтр
     (function(){
       const tbody = document.getElementById('users-tbody');
@@ -271,6 +293,43 @@
       });
       obs.observe(tbody, { childList: true, subtree: true });
     })();
+    // Пагинация без перезагрузки страницы (partial)
+    (function(){
+      const tbody = document.getElementById('users-tbody');
+      const pag = document.getElementById('users-pagination');
+      if (!tbody || !pag) return;
+      pag.addEventListener('click', async function(e){
+        const a = e.target.closest('a.page-link');
+        if (!a) return;
+        e.preventDefault();
+        const url = new URL(a.getAttribute('href'), window.location.origin);
+        try{
+          // table
+          const turl = new URL(tbody.getAttribute('data-fetch-url'), window.location.origin);
+          turl.searchParams.set('page', url.searchParams.get('page') || '1');
+          const qVal = url.searchParams.get('q') || (document.getElementById('users-search')?.value || '');
+          turl.searchParams.set('q', qVal);
+          const resp = await fetch(turl.toString(), { headers: { 'Accept':'text/html' }, credentials: 'same-origin' });
+          const html = await resp.text();
+          if (html){ tbody.innerHTML = html; restoreOpenedKeys(); applyFilter(); }
+          // pagination
+          const purl = new URL(pag.getAttribute('data-src'), window.location.origin);
+          purl.searchParams.set('page', turl.searchParams.get('page'));
+          purl.searchParams.set('q', turl.searchParams.get('q'));
+          const presp = await fetch(purl.toString(), { headers: { 'Accept':'text/html' }, credentials: 'same-origin' });
+          const phtml = await presp.text();
+          if (phtml) pag.innerHTML = phtml;
+          // sync data-fetch-url for auto-refresh
+          tbody.setAttribute('data-fetch-url', turl.pathname + '?' + turl.searchParams.toString());
+          // update URL bar (optional)
+          try {
+            const qp = turl.searchParams.get('q');
+            const pg = turl.searchParams.get('page') || '1';
+            history.replaceState(null,'', '/users?page=' + encodeURIComponent(pg) + (qp ? ('&q=' + encodeURIComponent(qp)) : ''));
+          } catch(_){ }
+        } catch(_){ }
+      });
+    })();
     // Тоггл строки с ключами
     table.addEventListener('click', function(e){
       const btn = e.target.closest('[data-toggle="keys"]');
@@ -281,13 +340,14 @@
       const isHidden = window.getComputedStyle(row).display === 'none';
       if (isHidden){
         openKeysForUid(uid);
+        ensureKeysLoaded(uid);
       } else {
         closeKeysForUid(uid);
       }
     });
 
     // Открытие модалки баланса с предустановленным знаком (+/-)
-    table.addEventListener('click', function(e){
+    table.addEventListener('click', async function(e){
       const btn = e.target.closest('.btn-user-balance-sign');
       if (!btn) return;
       const uid = btn.getAttribute('data-uid');
@@ -295,7 +355,11 @@
       const balance = btn.getAttribute('data-balance') || '0.00';
       const sign = btn.getAttribute('data-sign') || '';
       let refs = [];
-      try { refs = JSON.parse(btn.getAttribute('data-referrals') || '[]'); } catch(_){ refs = []; }
+      try {
+        const resp = await fetch(`{{ url_for('user_referrals_json', user_id=0) }}`.replace('/0/', `/${uid}/`), { headers: { 'Accept':'application/json' }, credentials: 'same-origin' });
+        const data = await resp.json();
+        refs = (data && data.ok) ? (data.items||[]) : [];
+      } catch(_){ refs = []; }
 
       const modalEl = document.getElementById('balanceModal');
       const bmUser = modalEl.querySelector('#bm-user');

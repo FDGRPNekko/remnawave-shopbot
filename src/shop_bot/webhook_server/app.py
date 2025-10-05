@@ -8,11 +8,11 @@ import base64
 import time
 import uuid
 from hmac import compare_digest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 from math import ceil
-from flask import Flask, request, render_template, redirect, url_for, flash, session, current_app, jsonify, send_file
-from flask_wtf.csrf import CSRFProtect, generate_csrf
+from flask import Flask, request, render_template, redirect, url_for, flash, session, current_app, jsonify, send_file  # type: ignore
+from flask_wtf.csrf import CSRFProtect, generate_csrf  # type: ignore
 import secrets
 import urllib.parse
 import urllib.request
@@ -27,6 +27,7 @@ from shop_bot.bot import keyboards
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from shop_bot.support_bot_controller import SupportBotController
 from shop_bot.data_manager import speedtest_runner
+from shop_bot.data_manager import resource_monitor
 from shop_bot.data_manager import backup_manager
 from shop_bot.data_manager import remnawave_repository as rw_repo
 from shop_bot.data_manager.remnawave_repository import (
@@ -42,11 +43,17 @@ from shop_bot.data_manager.remnawave_repository import (
     update_host_url, update_host_name, update_host_ssh_settings, get_latest_speedtest, get_speedtests,
     get_all_keys, get_keys_for_user, delete_key_by_id, update_key_comment,
     get_balance, adjust_user_balance, get_referrals_for_user,
+    # users pagination
+    get_users_paginated, get_keys_counts_for_users,
     # SSH targets for speedtests
     get_all_ssh_targets, get_ssh_target, create_ssh_target, update_ssh_target_fields, delete_ssh_target,
     get_user
 )
-from shop_bot.data_manager.database import update_host_remnawave_settings
+from shop_bot.data_manager.database import (
+    get_button_configs, create_button_config, update_button_config, 
+    delete_button_config, reorder_button_configs
+)
+from shop_bot.data_manager.database import update_host_remnawave_settings, get_plan_by_id
 
 _bot_controller = None
 _support_bot_controller = SupportBotController()
@@ -75,6 +82,10 @@ ALL_SETTINGS_KEYS = [
     "btn_admin_text", "btn_back_to_menu_text",
     # Backups
     "backup_interval_days",
+    # Monitoring
+    "monitoring_enabled", "monitoring_interval_sec",
+    "monitoring_cpu_threshold", "monitoring_mem_threshold", "monitoring_disk_threshold",
+    "monitoring_alert_cooldown_sec",
     # YooMoney (P2P) and Telegram Stars
     "yoomoney_enabled", "yoomoney_wallet", "yoomoney_secret", "stars_per_rub", "stars_enabled",
     # YooMoney OAuth optional keys + stored access token
@@ -108,12 +119,102 @@ def create_webhook_app(bot_controller_instance):
     
     # SECRET_KEY из окружения или сгенерированный на лету (без хардкода)
     flask_app.config['SECRET_KEY'] = os.getenv('SHOPBOT_SECRET_KEY') or secrets.token_hex(32)
-    from datetime import timedelta
     flask_app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
     # CSRF защита для всех POST форм в панели; вебхуки будут исключены
     csrf = CSRFProtect()
     csrf.init_app(flask_app)
+
+    # Вспомогательная функция: обработка промокода после успешной оплаты
+    def _handle_promo_after_payment(metadata: dict) -> None:
+        try:
+            promo_code = (metadata.get('promo_code') or '').strip()
+        except Exception:
+            promo_code = ''
+        if not promo_code:
+            return
+        try:
+            user_id = int(metadata.get('user_id') or 0)
+        except Exception:
+            user_id = 0
+        try:
+            applied_amount = float(metadata.get('promo_discount') or 0)
+        except Exception:
+            applied_amount = 0.0
+        order_id = metadata.get('payment_id') or metadata.get('transaction_id') or None
+
+        promo_info = None
+        availability_error = None
+        try:
+            promo_info = rw_repo.redeem_promo_code(promo_code, user_id, applied_amount=applied_amount, order_id=order_id)
+        except Exception as e:
+            logger.warning(f"Promo: redeem failed for code {promo_code}: {e}")
+
+        if promo_info is None:
+            try:
+                _, availability_error = rw_repo.check_promo_code_available(promo_code, user_id)
+            except Exception as e:
+                logger.warning(f"Promo: failed to re-check availability for {promo_code}: {e}")
+
+        should_deactivate = False
+        user_limit_reached = False
+        if promo_info:
+            try:
+                limit_total = promo_info.get('usage_limit_total') or 0
+                used_total = promo_info.get('used_total') or 0
+                if limit_total and used_total >= limit_total:
+                    should_deactivate = True
+            except Exception:
+                pass
+            try:
+                limit_user = promo_info.get('usage_limit_per_user') or 0
+                user_used = promo_info.get('user_used_count') or 0
+                if limit_user and user_used >= limit_user:
+                    user_limit_reached = True
+            except Exception:
+                pass
+        else:
+            if availability_error == "total_limit_reached":
+                should_deactivate = True
+            if availability_error == "user_limit_reached":
+                user_limit_reached = True
+
+        deact_ok = False
+        if should_deactivate:
+            try:
+                deact_ok = rw_repo.update_promo_code_status(promo_code, is_active=False)
+            except Exception as e:
+                logger.warning(f"Promo: deactivate failed for code {promo_code}: {e}")
+                deact_ok = False
+
+        # Уведомление админам
+        try:
+            bot = _bot_controller.get_bot_instance()
+            loop = current_app.config.get('EVENT_LOOP')
+            try:
+                admin_ids = list(rw_repo.get_admin_ids() or [])
+            except Exception:
+                admin_ids = []
+            if bot and loop and loop.is_running() and admin_ids:
+                if should_deactivate:
+                    status_msg = "Код отключён." if deact_ok else "Не удалось отключить код — проверьте панель."
+                elif user_limit_reached:
+                    status_msg = "Достигнут лимит на пользователя; код остаётся активным для остальных."
+                elif availability_error:
+                    status_msg = f"Статус: {availability_error}."
+                else:
+                    status_msg = "Лимит не достигнут, код остаётся активным."
+                text = (
+                    f"🎟 Промокод {promo_code} использован пользователем {user_id} на скидку {applied_amount:.2f} RUB. "
+                    f"{status_msg}"
+                )
+                for aid in admin_ids:
+                    try:
+                        asyncio.run_coroutine_threadsafe(bot.send_message(int(aid), text), loop)
+                    except Exception:
+                        continue
+        except Exception:
+            pass
 
     @flask_app.context_processor
     def inject_current_year():
@@ -276,6 +377,63 @@ def create_webhook_app(bot_controller_instance):
         data = get_daily_stats_for_charts(days=30)
         return jsonify(data)
 
+    # --- Resource Monitor ---
+    @flask_app.route('/monitor')
+    @login_required
+    def monitor_page():
+        hosts = []
+        ssh_targets = []
+        try:
+            hosts = get_all_hosts()
+            ssh_targets = get_all_ssh_targets()
+        except Exception:
+            hosts = []
+            ssh_targets = []
+        common_data = get_common_template_data()
+        return render_template('monitor.html', hosts=hosts, ssh_targets=ssh_targets, **common_data)
+
+    @flask_app.route('/monitor/local.json')
+    @login_required
+    def monitor_local_json():
+        try:
+            data = resource_monitor.get_local_metrics()
+        except Exception as e:
+            data = {"ok": False, "error": str(e)}
+        return jsonify(data)
+
+    @flask_app.route('/monitor/host/<host_name>.json')
+    @login_required
+    def monitor_host_json(host_name: str):
+        try:
+            data = resource_monitor.get_remote_metrics_for_host(host_name)
+        except Exception as e:
+            data = {"ok": False, "error": str(e)}
+        return jsonify(data)
+
+    @flask_app.route('/monitor/target/<target_name>.json')
+    @login_required
+    def monitor_target_json(target_name: str):
+        try:
+            data = resource_monitor.get_remote_metrics_for_target(target_name)
+        except Exception as e:
+            data = {"ok": False, "error": str(e)}
+        return jsonify(data)
+
+
+    @flask_app.route('/monitor/series/<scope>/<name>.json')
+    @login_required
+    def monitor_series_json(scope: str, name: str):
+        try:
+            hours = int(request.args.get('hours', '24') or '24')
+        except Exception:
+            hours = 24
+        
+        try:
+            series = rw_repo.get_metrics_series(scope, name, since_hours=hours, limit=1000)
+            return jsonify({"ok": True, "items": series})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     # --- Support partials ---
     @flask_app.route('/support/table.partial')
     @login_required
@@ -307,35 +465,91 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/users')
     @login_required
     def users_page():
-        users = get_all_users()
+        # Параметры пагинации и поиска
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 25, type=int)
+        q = (request.args.get('q') or '').strip()
+
+        # Пагинированный список пользователей
+        users, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
+        user_ids = [u['telegram_id'] for u in users]
+
+        # Количество ключей на пользователя (одним запросом)
+        try:
+            keys_counts = get_keys_counts_for_users(user_ids)
+        except Exception:
+            keys_counts = {}
+
         for user in users:
             uid = user['telegram_id']
-            user['user_keys'] = get_user_keys(uid)
+            # Лёгкие поля для списка
             try:
-                user['balance'] = get_balance(uid)
-                user['referrals'] = get_referrals_for_user(uid)
+                # баланс уже есть в users-строке (колонка users.balance)
+                user['balance'] = float(user.get('balance') or 0.0)
             except Exception:
                 user['balance'] = 0.0
-                user['referrals'] = []
-        
-        common_data = get_common_template_data()
-        return render_template('users.html', users=users, **common_data)
+            user['keys_count'] = int(keys_counts.get(uid, 0) or 0)
+            # Не грузим user_keys и referrals здесь — это будет по требованию
 
-    # Partial: users table tbody
+        from math import ceil
+        total_pages = ceil(total / per_page) if per_page else 1
+
+        common_data = get_common_template_data()
+        return render_template('users.html', users=users, current_page=page, total_pages=total_pages, q=q, per_page=per_page, **common_data)
+
+    # Partial: users table tbody (с пагинацией и поиском)
     @flask_app.route('/users/table.partial')
     @login_required
     def users_table_partial():
-        users = get_all_users()
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 25, type=int)
+        q = (request.args.get('q') or '').strip()
+        users, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
+        user_ids = [u['telegram_id'] for u in users]
+        try:
+            keys_counts = get_keys_counts_for_users(user_ids)
+        except Exception:
+            keys_counts = {}
         for user in users:
             uid = user['telegram_id']
-            user['user_keys'] = get_user_keys(uid)
             try:
-                user['balance'] = get_balance(uid)
-                user['referrals'] = get_referrals_for_user(uid)
+                user['balance'] = float(user.get('balance') or 0.0)
             except Exception:
                 user['balance'] = 0.0
-                user['referrals'] = []
+            user['keys_count'] = int(keys_counts.get(uid, 0) or 0)
         return render_template('partials/users_table.html', users=users)
+
+    # Partial: отдельная таблица ключей пользователя (ленивая подгрузка)
+    @flask_app.route('/users/<int:user_id>/keys.partial')
+    @login_required
+    def user_keys_partial(user_id: int):
+        try:
+            keys = get_user_keys(user_id)
+        except Exception:
+            keys = []
+        return render_template('partials/user_keys_table.html', keys=keys)
+
+    # JSON: рефералы пользователя (ленивая подгрузка в модалке баланса)
+    @flask_app.route('/users/<int:user_id>/referrals.json')
+    @login_required
+    def user_referrals_json(user_id: int):
+        try:
+            refs = get_referrals_for_user(user_id) or []
+            return jsonify({"ok": True, "items": refs, "count": len(refs)})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    # Partial: пагинация (рендерим ul.pagination) — удобно обновлять вместе с таблицей
+    @flask_app.route('/users/pagination.partial')
+    @login_required
+    def users_pagination_partial():
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 25, type=int)
+        q = (request.args.get('q') or '').strip()
+        _, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
+        from math import ceil
+        total_pages = ceil(total / per_page) if per_page else 1
+        return render_template('partials/users_pagination.html', current_page=page, total_pages=total_pages, q=q)
 
     @flask_app.route('/users/<int:user_id>/balance/adjust', methods=['POST'])
     @login_required
@@ -437,7 +651,6 @@ def create_webhook_app(bot_controller_instance):
             key_email = (request.form.get('key_email') or '').strip()
             expiry = request.form.get('expiry_date') or ''
             # ожидаем datetime-local, конвертируем в ms
-            from datetime import datetime
             expiry_ms = int(datetime.fromisoformat(expiry).timestamp() * 1000) if expiry else 0
         except Exception:
             flash('Проверьте поля ключа.', 'danger')
@@ -498,65 +711,167 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/admin/keys/create-ajax', methods=['POST'])
     @login_required
     def create_key_ajax_route():
-        try:
-            user_id = int(request.form.get('user_id'))
-            host_name = (request.form.get('host_name') or '').strip()
-            Remnawave_uuid = (request.form.get('Remnawave_client_uuid') or '').strip()
-            key_email = (request.form.get('key_email') or '').strip()
-            expiry = request.form.get('expiry_date') or ''
-            from datetime import datetime
-            expiry_ms = int(datetime.fromisoformat(expiry).timestamp() * 1000) if expiry else 0
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"invalid input: {e}"}), 400
+        """Создание ключа через панель: персонального либо универсального подарочного токена."""
+        mode = (request.form.get('mode') or 'personal').strip()
+        host_name = (request.form.get('host_name') or '').strip()
+        if not host_name:
+            return jsonify({"ok": False, "error": "host_required"}), 400
 
-        if not Remnawave_uuid:
-            Remnawave_uuid = str(uuid.uuid4())
+        comment = (request.form.get('comment') or '').strip()
+        plan_id = request.form.get('plan_id')
+        custom_days_raw = request.form.get('custom_days')
+        expiry_str = (request.form.get('expiry_date') or '').strip()
+        expiry_ms: int | None = None
+        if expiry_str:
+            try:
+                expiry_dt = datetime.fromisoformat(expiry_str)
+                expiry_ms = int(expiry_dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+            except Exception:
+                return jsonify({"ok": False, "error": "invalid_expiry"}), 400
 
-        try:
-            result = asyncio.run(remnawave_api.create_or_update_key_on_host(host_name, key_email, expiry_timestamp_ms=expiry_ms or None))
-        except Exception as e:
-            result = None
-            logger.error(f"create_key_ajax_route: ошибка панели/хоста: {e}")
-        if not result:
-            return jsonify({"ok": False, "error": "host_failed"}), 500
+        days_total = 0
+        if plan_id:
+            plan = get_plan_by_id(plan_id)
+            if plan:
+                try:
+                    months = int(plan.get('months') or 0)
+                except Exception:
+                    months = 0
+                days_total += months * 30
+        if custom_days_raw:
+            try:
+                days_total += max(0, int(custom_days_raw))
+            except Exception:
+                pass
 
-        # sync DB
-        new_id = rw_repo.record_key_from_payload(
-            user_id=user_id,
-            payload=result,
-            host_name=host_name,
-        )
+        if mode == 'personal':
+            try:
+                user_id = int(request.form.get('user_id'))
+                key_email = (request.form.get('key_email') or '').strip().lower()
+            except Exception as e:
+                logger.error(f"create_key_ajax_route: неверные параметры персонального режима: {e}")
+                return jsonify({"ok": False, "error": "bad_request"}), 400
+            if not key_email:
+                return jsonify({"ok": False, "error": "email_required"}), 400
+            target_user = get_user(user_id)
+            if not target_user:
+                return jsonify({"ok": False, "error": "user_not_found"}), 404
 
-        # notify user (без email, с пометкой про администратора)
-        try:
-            bot = _bot_controller.get_bot_instance()
-            if bot and new_id:
-                text = (
-                    '🔐 Ваш ключ готов!\n'
-                    f'Сервер: {host_name}\n'
-                    'Выдан администратором через панель.\n'
-                )
-                if result and result.get('connection_string'):
-                    cs = html_escape.escape(result['connection_string'])
-                    text += f"\nПодключение:\n<pre><code>{cs}</code></pre>"
-                loop = current_app.config.get('EVENT_LOOP')
-                if loop and loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        bot.send_message(chat_id=user_id, text=text, parse_mode='HTML', disable_web_page_preview=True),
-                        loop
+            if expiry_ms is None and days_total > 0:
+                expiry_ms = int((datetime.utcnow() + timedelta(days=days_total)).replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+            try:
+                result = asyncio.run(remnawave_api.create_or_update_key_on_host(
+                    host_name,
+                    key_email,
+                    expiry_timestamp_ms=expiry_ms or None,
+                ))
+            except Exception as e:
+                result = None
+                logger.error(f"create_key_ajax_route: ошибка панели/хоста: {e}")
+            if not result:
+                return jsonify({"ok": False, "error": "host_failed"}), 500
+
+            key_id = rw_repo.record_key_from_payload(
+                user_id=user_id,
+                payload=result,
+                host_name=host_name,
+                description=comment,
+            )
+            if not key_id:
+                return jsonify({"ok": False, "error": "db_failed"}), 500
+
+            # уведомление в телеграме оставляем как прежде
+            try:
+                bot = _bot_controller.get_bot_instance()
+                if bot and key_id:
+                    text = (
+                        '🔐 Ваш ключ готов!\n'
+                        f'Сервер: {host_name}\n'
+                        'Выдан администратором через панель.\n'
                     )
-                else:
-                    asyncio.run(bot.send_message(chat_id=user_id, text=text, parse_mode='HTML', disable_web_page_preview=True))
-        except Exception as e:
-            logger.warning(f"Не удалось уведомить пользователя (ajax): {e}")
+                    if result and result.get('connection_string'):
+                        cs = html_escape.escape(result['connection_string'])
+                        text += f"\nПодключение:\n<pre><code>{cs}</code></pre>"
+                    loop = current_app.config.get('EVENT_LOOP')
+                    if loop and loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            bot.send_message(chat_id=user_id, text=text, parse_mode='HTML', disable_web_page_preview=True),
+                            loop
+                        )
+                    else:
+                        asyncio.run(bot.send_message(chat_id=user_id, text=text, parse_mode='HTML', disable_web_page_preview=True))
+            except Exception as e:
+                logger.warning(f"Не удалось уведомить пользователя (ajax): {e}")
 
-        return jsonify({
-            "ok": True,
-            "key_id": new_id,
-            "uuid": result.get('client_uuid'),
-            "expiry_ms": result.get('expiry_timestamp_ms'),
-            "connection": result.get('connection_string')
-        })
+            return jsonify({
+                "ok": True,
+                "key_id": key_id,
+                "uuid": result.get('client_uuid'),
+                "expiry_ms": result.get('expiry_timestamp_ms'),
+                "connection": result.get('connection_string')
+            })
+
+        if mode == 'gift':
+            # Подарочный КЛЮЧ: создаём пользователя на Remnawave и сохраняем ключ в БД без привязки к телеграм-пользователю
+            # 1) Определяем срок действия
+            expiry_ms: int | None = None
+            if expiry_str:
+                try:
+                    expiry_dt = datetime.fromisoformat(expiry_str)
+                    expiry_ms = int(expiry_dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+                except Exception:
+                    return jsonify({"ok": False, "error": "invalid_expiry"}), 400
+            if expiry_ms is None and days_total > 0:
+                expiry_ms = int((datetime.utcnow() + timedelta(days=days_total)).replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+            # 2) Сгенерируем уникальный email для подарочного ключа
+            base_local = f"gift-{uuid.uuid4().hex[:8]}"
+            domain = "bot.local"
+            attempt = 0
+            while True:
+                candidate_email = f"{base_local if attempt == 0 else base_local + '-' + str(attempt)}@{domain}"
+                if not rw_repo.get_key_by_email(candidate_email):
+                    break
+                attempt += 1
+
+            # 3) Создадим/обновим ключ на Remnawave
+            try:
+                result = asyncio.run(remnawave_api.create_or_update_key_on_host(
+                    host_name,
+                    candidate_email,
+                    expiry_timestamp_ms=expiry_ms or None,
+                    description=comment or 'Gift key (created via admin panel)',
+                    tag='GIFT',
+                ))
+            except Exception as e:
+                logger.error(f"gift key create: remnawave error: {e}")
+                result = None
+            if not result:
+                return jsonify({"ok": False, "error": "host_failed"}), 500
+
+            # 4) Сохраним ключ в БД без привязки к пользователю (user_id=0)
+            key_id = rw_repo.record_key_from_payload(
+                user_id=0,
+                payload=result,
+                host_name=host_name,
+                description=comment or 'Gift key',
+            )
+            if not key_id:
+                return jsonify({"ok": False, "error": "db_failed"}), 500
+
+            # 5) Ответ с данными ключа для копирования
+            return jsonify({
+                "ok": True,
+                "key_id": key_id,
+                "email": candidate_email,
+                "uuid": result.get('client_uuid'),
+                "expiry_ms": result.get('expiry_timestamp_ms') or expiry_ms,
+                "connection": result.get('connection_string'),
+                "note": "Gift key created (not bound to Telegram user)."
+            })
+
+        return jsonify({"ok": False, "error": "unsupported_mode"}), 400
 
     @flask_app.route('/admin/keys/generate-email')
     @login_required
@@ -613,11 +928,9 @@ def create_webhook_app(bot_controller_instance):
         try:
             # Текущая дата истечения
             cur_expiry = key.get('expiry_date')
-            from datetime import datetime, timedelta
             if isinstance(cur_expiry, str):
                 try:
-                    from datetime import datetime as dt
-                    exp_dt = dt.fromisoformat(cur_expiry)
+                    exp_dt = datetime.fromisoformat(cur_expiry)
                 except Exception:
                     # fallback: если в БД дата как 'YYYY-MM-DD HH:MM:SS'
                     try:
@@ -655,8 +968,7 @@ def create_webhook_app(bot_controller_instance):
             try:
                 user_id = key.get('user_id')
                 new_ms_final = int(result.get('expiry_timestamp_ms'))
-                from datetime import datetime as _dt
-                new_dt_local = _dt.fromtimestamp(new_ms_final/1000)
+                new_dt_local = datetime.fromtimestamp(new_ms_final/1000)
                 text = (
                     "🗓️ Срок вашего VPN-ключа изменён администратором.\n"
                     f"Хост: {key.get('host_name')}\n"
@@ -1152,7 +1464,7 @@ def create_webhook_app(bot_controller_instance):
                 update_setting('panel_password', request.form.get('panel_password'))
 
             # Обработка чекбоксов, где в форме идёт hidden=false + checkbox=true
-            checkbox_keys = ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled']
+            checkbox_keys = ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled', 'monitoring_enabled']
             for checkbox_key in checkbox_keys:
                 values = request.form.getlist(checkbox_key)
                 value = values[-1] if values else 'false'
@@ -1726,17 +2038,63 @@ def create_webhook_app(bot_controller_instance):
             return 'Error', 500
         
     @csrf.exempt
+    @flask_app.route('/test-webhook', methods=['GET', 'POST'])
+    def test_webhook():
+        """Тестовый endpoint для проверки работы webhook сервера"""
+        if request.method == 'GET':
+            return f"Webhook server is running! Time: {datetime.now()}"
+        else:
+            return f"POST received! Data: {request.get_json() or request.form.to_dict()}"
+    
+    @csrf.exempt
+    @flask_app.route('/debug-all', methods=['GET', 'POST', 'PUT', 'DELETE'])
+    def debug_all_requests():
+        """Endpoint для отладки всех входящих запросов"""
+        print(f"[DEBUG] Received {request.method} request to /debug-all")
+        print(f"[DEBUG] Headers: {dict(request.headers)}")
+        print(f"[DEBUG] Form data: {request.form.to_dict()}")
+        print(f"[DEBUG] JSON data: {request.get_json()}")
+        print(f"[DEBUG] Args: {request.args.to_dict()}")
+        
+        return {
+            "method": request.method,
+            "headers": dict(request.headers),
+            "form": request.form.to_dict(),
+            "json": request.get_json(),
+            "args": request.args.to_dict(),
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    @csrf.exempt
     @flask_app.route('/yoomoney-webhook', methods=['POST'])
     def yoomoney_webhook_handler():
         """ЮMoney HTTP уведомление (кнопка/ссылка p2p). Подпись: sha1(notification_type&operation_id&amount&currency&datetime&sender&codepro&notification_secret&label)."""
+        logger.info("🔔 Получен webhook от ЮMoney")
+        
         try:
             form = request.form
+            logger.info(f"📋 Данные webhook: {dict(form)}")
+            
             required = [
                 'notification_type', 'operation_id', 'amount', 'currency', 'datetime', 'sender', 'codepro', 'label', 'sha1_hash'
             ]
             if not all(k in form for k in required):
-                logger.warning("YooMoney webhook: missing required fields")
+                logger.warning(f"❌ Отсутствуют обязательные поля. Доступно: {list(form.keys())}")
                 return 'Bad Request', 400
+            
+            # Проверяем тип уведомления - обрабатываем только p2p-incoming
+            notification_type = form.get('notification_type', '')
+            logger.info(f"📝 Тип уведомления: {notification_type}")
+            if notification_type != 'p2p-incoming':
+                logger.info(f"⏭️  Игнорируем тип уведомления: {notification_type}")
+                return 'OK', 200
+            
+            # Проверяем, что это не тестовый платеж
+            codepro = form.get('codepro', '')
+            if codepro.lower() == 'true':
+                logger.info("🧪 Игнорируем тестовый платеж (codepro=true)")
+                return 'OK', 200
+            
             secret = get_setting('yoomoney_secret') or ''
             signature_str = "&".join([
                 form.get('notification_type',''),
@@ -1752,24 +2110,33 @@ def create_webhook_app(bot_controller_instance):
             expected = hashlib.sha1(signature_str.encode('utf-8')).hexdigest()
             provided = (form.get('sha1_hash') or '').lower()
             if expected != provided:
-                logger.warning("YooMoney webhook: invalid signature")
+                logger.warning("🔐 Неверная подпись")
                 return 'Forbidden', 403
+            
             # Use label as payment_id
             payment_id = form.get('label')
             if not payment_id:
+                logger.warning("🏷️  Пустой label")
                 return 'OK', 200
+            
+            logger.info(f"💰 Обрабатываем платеж: {payment_id}")
             metadata = find_and_complete_pending_transaction(payment_id)
             if not metadata:
-                logger.warning(f"YooMoney webhook: metadata not found for label {payment_id}")
+                logger.warning(f"❌ Метаданные не найдены для платежа: {payment_id}")
                 return 'OK', 200
+            
+            logger.info(f"✅ Найдены метаданные для платежа {payment_id}: пользователь={metadata.get('user_id')}, сумма={metadata.get('price')}")
             bot = _bot_controller.get_bot_instance()
             loop = current_app.config.get('EVENT_LOOP')
             payment_processor = handlers.process_successful_payment
             if bot and loop and loop.is_running():
                 asyncio.run_coroutine_threadsafe(payment_processor(bot, metadata), loop)
+                logger.info(f"🚀 Запущена обработка платежа: {payment_id}")
+            else:
+                logger.error("❌ Бот или цикл событий недоступен")
             return 'OK', 200
         except Exception as e:
-            logger.error(f"Ошибка в обработчике вебхука YooMoney: {e}", exc_info=True)
+            logger.error(f"💥 Ошибка в webhook ЮMoney: {e}", exc_info=True)
             return 'Error', 500
 
     @csrf.exempt
@@ -1803,12 +2170,22 @@ def create_webhook_app(bot_controller_instance):
                     "customer_email": parts[7] if parts[7] != 'None' else None,
                     "payment_method": parts[8]
                 }
+                # Возможные дополнительные поля: promo_code, promo_discount
+                if len(parts) >= 10:
+                    metadata["promo_code"] = (parts[9] if parts[9] != 'None' else None)
+                if len(parts) >= 11:
+                    metadata["promo_discount"] = parts[10]
                 
                 bot = _bot_controller.get_bot_instance()
                 loop = current_app.config.get('EVENT_LOOP')
                 payment_processor = handlers.process_successful_payment
 
                 if bot and loop and loop.is_running():
+                    # Обработка промокода до основного обработчика
+                    try:
+                        _handle_promo_after_payment(metadata)
+                    except Exception:
+                        pass
                     asyncio.run_coroutine_threadsafe(payment_processor(bot, metadata), loop)
                 else:
                     logger.error("CryptoBot вебхук: не удалось обработать платёж — бот или цикл событий не запущены.")
@@ -1847,6 +2224,11 @@ def create_webhook_app(bot_controller_instance):
                 if not metadata_str: return 'Error', 400
                 
                 metadata = json.loads(metadata_str)
+                # Обработка промокода
+                try:
+                    _handle_promo_after_payment(metadata)
+                except Exception:
+                    pass
                 
                 bot = _bot_controller.get_bot_instance()
                 loop = current_app.config.get('EVENT_LOOP')
@@ -2002,6 +2384,128 @@ def create_webhook_app(bot_controller_instance):
         else:
             flash('YooMoney: не удалось проверить operation-history.', 'warning')
         return redirect(url_for('settings_page', tab='payments'))
+
+    # Button Constructor API endpoints
+    @flask_app.route('/api/button-configs/<menu_type>')
+    @login_required
+    @csrf.exempt
+    def get_button_configs_api(menu_type):
+        """Get button configurations for a specific menu type"""
+        try:
+            configs = get_button_configs(menu_type)
+            return jsonify({'success': True, 'data': configs})
+        except Exception as e:
+            logger.error(f"Error getting button configs for {menu_type}: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @flask_app.route('/api/button-configs', methods=['POST'])
+    @login_required
+    @csrf.exempt
+    def create_button_config_api():
+        """Create a new button configuration"""
+        try:
+            data = request.json
+            required_fields = ['menu_type', 'button_id', 'text']
+            for field in required_fields:
+                if field not in data:
+                    return jsonify({'success': False, 'error': f'Missing required field: {field}'}), 400
+
+            success = create_button_config(
+                menu_type=data['menu_type'],
+                button_id=data['button_id'],
+                text=data['text'],
+                callback_data=data.get('callback_data'),
+                url=data.get('url'),
+                row_position=data.get('row_position', 0),
+                column_position=data.get('column_position', 0),
+                button_width=data.get('button_width', 1),
+                metadata=data.get('metadata')
+            )
+            
+            if success:
+                return jsonify({'success': True, 'message': 'Button configuration created'})
+            else:
+                return jsonify({'success': False, 'error': 'Failed to create button configuration'}), 500
+        except Exception as e:
+            logger.error(f"Error creating button config: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @flask_app.route('/api/button-configs/<int:button_id>', methods=['PUT'])
+    @login_required
+    @csrf.exempt
+    def update_button_config_api(button_id):
+        """Update an existing button configuration"""
+        try:
+            data = request.json
+            logger.info(f"API update request for button {button_id}: {data}")
+            
+            success = update_button_config(
+                button_id=button_id,
+                text=data.get('text'),
+                callback_data=data.get('callback_data'),
+                url=data.get('url'),
+                row_position=data.get('row_position'),
+                column_position=data.get('column_position'),
+                button_width=data.get('button_width'),
+                is_active=data.get('is_active'),
+                sort_order=data.get('sort_order'),
+                metadata=data.get('metadata')
+            )
+            
+            if success:
+                logger.info(f"Successfully updated button {button_id}")
+                return jsonify({'success': True, 'message': 'Button configuration updated'})
+            else:
+                logger.error(f"Failed to update button {button_id}")
+                return jsonify({'success': False, 'error': 'Failed to update button configuration'}), 500
+        except Exception as e:
+            logger.error(f"Error updating button config {button_id}: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @flask_app.route('/api/button-configs/<int:button_id>', methods=['DELETE'])
+    @login_required
+    @csrf.exempt
+    def delete_button_config_api(button_id):
+        """Delete a button configuration"""
+        try:
+            success = delete_button_config(button_id)
+            if success:
+                return jsonify({'success': True, 'message': 'Button configuration deleted'})
+            else:
+                return jsonify({'success': False, 'error': 'Failed to delete button configuration'}), 500
+        except Exception as e:
+            logger.error(f"Error deleting button config {button_id}: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @flask_app.route('/api/button-configs/<menu_type>/reorder', methods=['POST'])
+    @login_required
+    @csrf.exempt
+    def reorder_button_configs_api(menu_type):
+        """Reorder button configurations for a menu type"""
+        try:
+            data = request.json
+            button_orders = data.get('button_orders', [])
+            # logger.info(f"API reorder request for {menu_type}: {len(button_orders)} buttons")  # Убрано для уменьшения логов
+            # logger.info(f"Button orders data: {button_orders}")  # Убрано для уменьшения логов
+            
+            success = reorder_button_configs(menu_type, button_orders)
+            
+            if success:
+                logger.info(f"Successfully reordered buttons for {menu_type}")
+                return jsonify({'success': True, 'message': 'Button configurations reordered'})
+            else:
+                logger.error(f"Failed to reorder buttons for {menu_type}")
+                return jsonify({'success': False, 'error': 'Failed to reorder button configurations'}), 500
+        except Exception as e:
+            logger.error(f"Error reordering button configs for {menu_type}: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @flask_app.route('/button-constructor')
+    @login_required
+    def button_constructor_page():
+        """Button constructor page"""
+        template_data = get_common_template_data()
+        return render_template('button_constructor.html', **template_data)
 
     return flask_app
 

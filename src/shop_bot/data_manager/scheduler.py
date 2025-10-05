@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import json
 
 from datetime import datetime, timedelta
 
@@ -8,6 +9,7 @@ from aiogram import Bot
 
 from shop_bot.bot_controller import BotController
 from shop_bot.data_manager import remnawave_repository as rw_repo
+from shop_bot.data_manager import resource_monitor
 from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager import backup_manager
 
@@ -25,6 +27,8 @@ logger = logging.getLogger(__name__)
 SPEEDTEST_INTERVAL_SECONDS = 8 * 3600
 _last_speedtests_run_at: datetime | None = None
 _last_backup_run_at: datetime | None = None
+_last_resource_collect_at: datetime | None = None
+_last_resource_alert_at: dict[tuple[str, str, str], datetime] = {}
 
 def format_time_left(hours: int) -> str:
     if hours >= 24:
@@ -303,6 +307,10 @@ async def periodic_subscription_check(bot_controller: BotController):
             if bot:
                 await _maybe_run_daily_backup(bot)
 
+            # Периодический сбор метрик и алерты
+            bot = bot_controller.get_bot_instance() if bot_controller.get_status().get("is_running") else None
+            await _maybe_collect_resource_metrics(bot)
+
             if bot_controller.get_status().get("is_running"):
                 bot = bot_controller.get_bot_instance()
                 if bot:
@@ -387,10 +395,95 @@ async def _run_speedtests_for_all_ssh_targets():
         except Exception as e:
             logger.error(f"Scheduler: Ошибка выполнения SSH speedtest для цели '{target_name}': {e}", exc_info=True)
 
+
+
+async def _maybe_collect_resource_metrics(bot: Bot | None):
+    """Периодический сбор метрик (локально + SSH на хостах) и отправка алертов при превышении порогов.
+    Читает настройки:
+      - monitoring_enabled (true/false)
+      - monitoring_interval_sec (по умолчанию 300)
+      - monitoring_cpu_threshold, monitoring_mem_threshold, monitoring_disk_threshold (проценты)
+      - monitoring_alert_cooldown_sec (по умолчанию 3600)
+    """
+    global _last_resource_collect_at, _last_resource_alert_at
+    try:
+        enabled = (rw_repo.get_setting("monitoring_enabled") or "true").strip().lower() == "true"
+        if not enabled:
+            return
+        try:
+            interval_sec = int((rw_repo.get_setting("monitoring_interval_sec") or "300").strip() or 300)
+        except Exception:
+            interval_sec = 300
+        now = datetime.now()
+        if _last_resource_collect_at and (now - _last_resource_collect_at).total_seconds() < max(30, interval_sec):
+            return
+
+        # Пороговые значения
+        def _to_int(s: str | None, default: int) -> int:
+            try:
+                return int((s or "").strip() or default)
+            except Exception:
+                return default
+        cpu_thr = _to_int(rw_repo.get_setting("monitoring_cpu_threshold"), 90)
+        mem_thr = _to_int(rw_repo.get_setting("monitoring_mem_threshold"), 90)
+        disk_thr = _to_int(rw_repo.get_setting("monitoring_disk_threshold"), 90)
+        cooldown = _to_int(rw_repo.get_setting("monitoring_alert_cooldown_sec"), 3600)
+
+        # 1) Локально
+        try:
+            local = resource_monitor.get_local_metrics()
+            cpu_p = (local.get('cpu') or {}).get('percent')
+            mem_p = (local.get('memory') or {}).get('percent')
+            disks = local.get('disks') or []
+            disk_p = max((d.get('percent') or 0) for d in disks) if disks else None
+            rw_repo.insert_resource_metric(
+                'local', 'panel',
+                cpu_percent=cpu_p, mem_percent=mem_p, disk_percent=disk_p,
+                load1=(local.get('cpu') or {}).get('loadavg',[None])[0] if (local.get('cpu') or {}).get('loadavg') else None,
+                net_bytes_sent=(local.get('net') or {}).get('bytes_sent'),
+                net_bytes_recv=(local.get('net') or {}).get('bytes_recv'),
+                raw_json=json.dumps(local, ensure_ascii=False)
+            )
+            await _maybe_alert(bot, scope='local', name='panel', cpu=cpu_p, mem=mem_p, disk=disk_p,
+                               cpu_thr=cpu_thr, mem_thr=mem_thr, disk_thr=disk_thr, cooldown_sec=cooldown)
+        except Exception:
+            logger.debug("Scheduler: local metrics collection failed", exc_info=True)
+
+        # 2) Для всех хостов с SSH
+        hosts = rw_repo.get_all_hosts() or []
+        for h in hosts:
+            name = h.get('host_name') or ''
+            if not name:
+                continue
+            # проверим наличие SSH настроек
+            if not (h.get('ssh_host') and h.get('ssh_user')):
+                continue
+            try:
+                rm = resource_monitor.get_remote_metrics_for_host(name)
+                mem_p = (rm.get('memory') or {}).get('percent')
+                disks = rm.get('disks') or []
+                disk_p = max((d.get('percent') or 0) for d in disks) if disks else None
+                rw_repo.insert_resource_metric(
+                    'host', name,
+                    mem_percent=mem_p,
+                    disk_percent=disk_p,
+                    load1=(rm.get('loadavg') or [None])[0],
+                    raw_json=json.dumps(rm, ensure_ascii=False)
+                )
+                await _maybe_alert(bot, scope='host', name=name, cpu=None, mem=mem_p, disk=disk_p,
+                                   cpu_thr=cpu_thr, mem_thr=mem_thr, disk_thr=disk_thr, cooldown_sec=cooldown)
+            except Exception:
+                logger.debug("Scheduler: host metrics collection failed for %s", name, exc_info=True)
+
+        _last_resource_collect_at = now
+    except Exception:
+        logger.error("Scheduler: Ошибка сбора метрик ресурсов", exc_info=True)
+
+
 async def _maybe_run_daily_backup(bot: Bot):
+    """Ежедневный автобэкап базы и отправка админам. Интервал задаётся в настройках backup_interval_days."""
     global _last_backup_run_at
     now = datetime.now()
-    # Считаем интервал из настроек (в днях). 0 или пусто — автобэкап выключен.
     try:
         s = rw_repo.get_setting("backup_interval_days") or "1"
         days = int(str(s).strip() or "1")
@@ -416,6 +509,170 @@ async def _maybe_run_daily_backup(bot: Bot):
         _last_backup_run_at = now
     except Exception as e:
         logger.error(f"Scheduler: Критическая ошибка при создании и отправке бэкапа: {e}", exc_info=True)
+
+
+async def _maybe_alert(
+    bot: Bot | None,
+    *,
+    scope: str,
+    name: str,
+    cpu: float | None,
+    mem: float | None,
+    disk: float | None,
+    cpu_thr: int,
+    mem_thr: int,
+    disk_thr: int,
+    cooldown_sec: int,
+):
+    if not bot:
+        return
+    
+    # Определяем критические и предупреждающие пороги
+    cpu_warning = max(50, cpu_thr - 20)
+    mem_warning = max(50, mem_thr - 20)
+    disk_warning = max(50, disk_thr - 20)
+    
+    breaches: list[dict] = []
+    alerts: list[dict] = []
+    
+    # Проверяем процессор
+    if cpu is not None:
+        if cpu >= cpu_thr:
+            breaches.append({
+                'type': 'Процессор',
+                'value': cpu,
+                'threshold': cpu_thr,
+                'level': 'critical',
+                'emoji': '🔴'
+            })
+        elif cpu >= cpu_warning:
+            alerts.append({
+                'type': 'Процессор',
+                'value': cpu,
+                'threshold': cpu_warning,
+                'level': 'warning',
+                'emoji': '🟡'
+            })
+    
+    # Проверяем память
+    if mem is not None:
+        if mem >= mem_thr:
+            breaches.append({
+                'type': 'Память',
+                'value': mem,
+                'threshold': mem_thr,
+                'level': 'critical',
+                'emoji': '🔴'
+            })
+        elif mem >= mem_warning:
+            alerts.append({
+                'type': 'Память',
+                'value': mem,
+                'threshold': mem_warning,
+                'level': 'warning',
+                'emoji': '🟡'
+            })
+    
+    # Проверяем Disk
+    if disk is not None:
+        if disk >= disk_thr:
+            breaches.append({
+                'type': 'Диск',
+                'value': disk,
+                'threshold': disk_thr,
+                'level': 'critical',
+                'emoji': '🔴'
+            })
+        elif disk >= disk_warning:
+            alerts.append({
+                'type': 'Диск',
+                'value': disk,
+                'threshold': disk_warning,
+                'level': 'warning',
+                'emoji': '🟡'
+            })
+    
+    # Отправляем критические алерты
+    if breaches:
+        key = (scope, name, "critical", ",".join(sorted([b['type'] for b in breaches])))
+        now = datetime.now()
+        last = _last_resource_alert_at.get(key)
+        if not last or (now - last).total_seconds() >= max(60, cooldown_sec):
+            _last_resource_alert_at[key] = now
+            await _send_alert(bot, scope, name, breaches, 'critical')
+    
+    # Отправляем предупреждения (реже)
+    if alerts:
+        key = (scope, name, "warning", ",".join(sorted([a['type'] for a in alerts])))
+        now = datetime.now()
+        last = _last_resource_alert_at.get(key)
+        if not last or (now - last).total_seconds() >= max(300, cooldown_sec * 2):  # Предупреждения реже
+            _last_resource_alert_at[key] = now
+            await _send_alert(bot, scope, name, alerts, 'warning')
+
+
+async def _send_alert(bot: Bot, scope: str, name: str, issues: list[dict], level: str):
+    """Отправка алерта админам"""
+    try:
+        admin_ids = rw_repo.get_admin_ids() or set()
+    except Exception:
+        admin_ids = set()
+    if not admin_ids:
+        return
+    
+    # Определяем иконку и заголовок
+    if level == 'critical':
+        header_emoji = "🚨"
+        header_text = "КРИТИЧЕСКИЙ АЛЕРТ"
+    else:
+        header_emoji = "⚠️"
+        header_text = "ПРЕДУПРЕЖДЕНИЕ"
+    
+    # Определяем объект
+    if scope == 'local':
+        obj_name = f"🖥️ Панель ({name})"
+    elif scope == 'host':
+        obj_name = f"🖥️ Хост {name}"
+    elif scope == 'target':
+        obj_name = f"🔌 SSH-цель {name}"
+    else:
+        obj_name = f"❓ {scope}:{name}"
+    
+    # Формируем текст
+    text_lines = [
+        f"{header_emoji} <b>{header_text}</b>",
+        "",
+        f"🎯 <b>Объект:</b> {obj_name}",
+        f"⏰ <b>Время:</b> <code>{datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</code>",
+        "",
+        "📊 <b>Проблемы:</b>"
+    ]
+    
+    for issue in issues:
+        emoji = issue['emoji']
+        type_name = issue['type']
+        value = issue['value']
+        threshold = issue['threshold']
+        text_lines.append(f"  {emoji} <b>{type_name}:</b> {value:.1f}% (порог: {threshold}%)")
+    
+    # Добавляем рекомендации
+    text_lines.extend([
+        "",
+        "💡 <b>Рекомендации:</b>",
+        "• Проверьте нагрузку на систему",
+        "• Освободите место на диске",
+        "• Перезапустите сервисы при необходимости",
+        "• Используйте команду /admin для детального мониторинга"
+    ])
+    
+    text = "\n".join(text_lines)
+    
+    # Отправляем всем админам
+    for admin_id in admin_ids:
+        try:
+            await bot.send_message(admin_id, text, parse_mode='HTML')
+        except Exception:
+            continue
 
 
 

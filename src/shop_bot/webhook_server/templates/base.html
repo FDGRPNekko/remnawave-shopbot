@@ -25,7 +25,6 @@
 		<!-- Charts -->
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <!-- Optional: zoom/pan plugin for Chart.js -->
-        <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.umd.min.js"></script>
 	</head>
 	<body data-page="{{ request.endpoint }}" class="layout-boxed">
 		<div class="container">
@@ -38,40 +37,24 @@
 					<button type="button" id="brand-edit" class="btn btn-outline-secondary btn-sm btn-glass" title="Сменить название">✏️</button>
 				</div>
 				<nav class="navigation justify-content-center">
-					<a
-						href="{{ url_for('dashboard_page') }}"
-						class="nav-link {% if request.endpoint == 'dashboard_page' %}active{% endif %}"
-						>Главная</a
-					>
-					<a
-						href="{{ url_for('users_page') }}"
-						class="nav-link {% if request.endpoint == 'users_page' %}active{% endif %}"
-						>Пользователи</a>
-					<a
-						href="{{ url_for('admin_keys_page') }}"
-						class="nav-link {% if request.endpoint == 'admin_keys_page' %}active{% endif %}"
-						>Ключи</a>
-					<a
-                        href="{{ url_for('support_list_page') }}"
-                        class="nav-link {% if request.endpoint in ['support_list_page', 'support_ticket_page'] %}active{% endif %}"
-                    >
-                        Поддержка
-                        <span class="open-tickets-badge"
-                              data-fetch-url="{{ url_for('support_open_count_partial') }}"
-                              data-fetch-interval="10000">
-                            {% if open_tickets_count and open_tickets_count > 0 %}
-                            <span class="badge bg-green-lt" title="Открытые тикеты">
-                                <span class="status-dot status-dot-animated bg-green"></span>{{ open_tickets_count }}
-                            </span>
-                            {% endif %}
-                        </span>
-                    </a>
-					<a
-						href="{{ url_for('settings_page') }}"
-						class="nav-link {% if request.endpoint == 'settings_page' %}active{% endif %}"
-						>Настройки</a>
+					<a href="{{ url_for('dashboard_page') }}" class="nav-link {% if request.endpoint == 'dashboard_page' %}active{% endif %}">Главная</a>
+					<a href="{{ url_for('users_page') }}" class="nav-link {% if request.endpoint == 'users_page' %}active{% endif %}">Пользователи</a>
+					<a href="{{ url_for('admin_keys_page') }}" class="nav-link {% if request.endpoint == 'admin_keys_page' %}active{% endif %}">Ключи</a>
+					<a href="{{ url_for('support_list_page') }}" class="nav-link {% if request.endpoint in ['support_list_page', 'support_ticket_page'] %}active{% endif %}">
+						Поддержка
+						<span class="open-tickets-badge" data-fetch-url="{{ url_for('support_open_count_partial') }}" data-fetch-interval="10000">
+							{% if open_tickets_count and open_tickets_count > 0 %}
+							<span class="badge bg-green-lt" title="Открытые тикеты">
+								<span class="status-dot status-dot-animated bg-green"></span>{{ open_tickets_count }}
+							</span>
+							{% endif %}
+						</span>
+					</a>
+					<a href="{{ url_for('settings_page') }}" class="nav-link {% if request.endpoint == 'settings_page' %}active{% endif %}">Настройки</a>
+					<a href="{{ url_for('button_constructor_page') }}" class="nav-link {% if request.endpoint == 'button_constructor_page' %}active{% endif %}">Конструктор кнопок</a>
+					<a href="{{ url_for('monitor_page') }}" class="nav-link {% if request.endpoint == 'monitor_page' %}active{% endif %}">Мониторинг</a>
 				</nav>
-                <div class="bm float-end">
+				<div class="bm float-end">
 					<input id="burger" type="checkbox" />
 					<label for="burger" class="burger_img"></label>
 					<nav class="burger-menu">
@@ -81,47 +64,55 @@
 							<li><a href="{{ url_for('admin_keys_page') }}">Ключи</a></li>
 							<li><a href="{{ url_for('support_list_page') }}">Поддержка</a></li>
 							<li><a href="{{ url_for('settings_page') }}">Настройки</a></li>
+							<li><a href="{{ url_for('button_constructor_page') }}">Конструктор кнопок</a></li>
+							<li><a href="{{ url_for('monitor_page') }}">Мониторинг</a></li>
 						</ul>
 					</nav>
 				</div>
+
 				<div class="header-controls">
 					<div class="bot-control">
-						{% if bot_status.is_running %}
-						<p class="status-running"><span class="status-dot status-dot-animated bg-green"></span>Статус: <strong>Запущен</strong></p>
-						<form action="{{ url_for('stop_both_bots_route') }}" method="post">
-							<button type="submit" class="btn btn-danger btn-sm">
-								Остановить
-							</button>
-						</form>
+						{% set main_running = bot_status and bot_status.is_running %}
+						{% set support_running = support_bot_status and support_bot_status.is_running %}
+						{% if main_running and support_running %}
+							<p class="status-running"><span class="status-dot status-dot-animated bg-green"></span>Статус: <strong>Запущен</strong></p>
+							<form action="{{ url_for('stop_both_bots_route') }}" method="post" class="d-inline-flex align-items-center gap-2">
+								<input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+								<button type="submit" class="btn btn-danger btn-sm">Остановить</button>
+							</form>
+						{% elif main_running %}
+							<p class="status-warning"><span class="status-dot status-dot-animated bg-yellow"></span>Основной бот запущен, Support-бот остановлен</p>
+							<form action="{{ url_for('stop_both_bots_route') }}" method="post" class="d-inline-flex align-items-center gap-2">
+								<input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+								<button type="submit" class="btn btn-danger btn-sm">Остановить</button>
+							</form>
+						{% elif support_running %}
+							<p class="status-warning"><span class="status-dot status-dot-animated bg-yellow"></span>Support-бот запущен, основной бот остановлен</p>
+							<form action="{{ url_for('stop_both_bots_route') }}" method="post" class="d-inline-flex align-items-center gap-2">
+								<input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+								<button type="submit" class="btn btn-danger btn-sm">Остановить</button>
+							</form>
 						{% else %}
-						<p class="status-stopped"><span class="status-dot"></span>Статус: <strong>Остановлен</strong></p>
-						{% if all_settings_ok and support_settings_ok %}
-						<form action="{{ url_for('start_both_bots_route') }}" method="post">
-							<button type="submit" class="btn btn-success btn-sm">
-								Запустить
-							</button>
-						</form>
-						{% else %}
-						<button class="btn btn-secondary btn-sm" disabled>
-							Запустить
-						</button>
-						{% endif %} {% endif %}
+							<p class="status-stopped"><span class="status-dot"></span>Статус: <strong>Остановлен</strong></p>
+							{% if all_settings_ok and support_settings_ok %}
+								<form action="{{ url_for('start_both_bots_route') }}" method="post" class="d-inline-flex align-items-center gap-2">
+									<input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+									<button type="submit" class="btn btn-success btn-sm">Запустить</button>
+								</form>
+							{% else %}
+								<button class="btn btn-secondary btn-sm" disabled>Запустить</button>
+							{% endif %}
+						{% endif %}
 					</div>
 
 					<div class="user-session-controls">
 						<span>Вы вошли в систему.</span>
-						<form
-							action="{{ url_for('logout_page') }}"
-							method="post"
-							style="display: inline"
-						>
+						<form action="{{ url_for('logout_page') }}" method="post" style="display: inline">
 							<button type="submit" class="btn btn-outline-secondary">Выйти</button>
 						</form>
-						<button type="button" id="theme-toggle" class="btn btn-outline-primary ms-2" title="Переключить тему">
-							<span class="theme-label">Тёмная</span>
-						</button>
 					</div>
 				</div>
+
 			</header>
 
 			<!-- Toast container -->

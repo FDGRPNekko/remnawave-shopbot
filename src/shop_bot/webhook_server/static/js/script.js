@@ -404,7 +404,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 keysChart.update('none');
             }catch(_){/* noop */}
         }
-        setInterval(refreshCharts, 10000);
+        
+        // Задержка перед первым обновлением графиков для предотвращения подергивания
+        setTimeout(() => {
+            setInterval(refreshCharts, 10000);
+        }, 1500);
     }
 
     function initializeTicketAutoRefresh() {
@@ -523,8 +527,15 @@ document.addEventListener('DOMContentLoaded', function () {
             const interval = Number(node.getAttribute('data-fetch-interval')||'8000');
             if (!url) return;
             let timer = null;
+            let isFirstLoad = true;
+            
             async function tick(){
                 try{
+                    // Добавляем класс загрузки для плавности
+                    if (!isFirstLoad) {
+                        node.classList.add('loading');
+                    }
+                    
                     const resp = await fetch(url, { headers: { 'Accept': 'text/html' }, cache: 'no-store', credentials: 'same-origin' });
                     if (resp.redirected) { window.location.href = resp.url; return; }
                     if (resp.status === 401 || resp.status === 403) { window.location.href = '/login'; return; }
@@ -548,10 +559,22 @@ document.addEventListener('DOMContentLoaded', function () {
                         try { setupConfirmationForms(node); } catch(_){ }
                         setTimeout(()=>{ node.style.minHeight = ''; node.classList.remove('is-swapping'); }, 260);
                     }
+                    
+                    // Убираем класс загрузки
+                    node.classList.remove('loading');
+                    if (isFirstLoad) {
+                        node.classList.add('dashboard-loaded');
+                        isFirstLoad = false;
+                    }
                 }catch(_){/* noop */}
             }
-            tick();
-            timer = setInterval(tick, Math.max(4000, interval));
+            
+            // Задержка перед первым обновлением для предотвращения подергивания
+            setTimeout(() => {
+                tick();
+                timer = setInterval(tick, Math.max(4000, interval));
+            }, 1000);
+            
             node.addEventListener('soft-update-stop', ()=>{ if (timer){ clearInterval(timer); timer=null; } });
             window.addEventListener('beforeunload', ()=>{ if (timer){ clearInterval(timer); timer=null; } });
         });

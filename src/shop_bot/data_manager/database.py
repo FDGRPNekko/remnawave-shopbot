@@ -8,8 +8,20 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path("/app/project")
-DB_FILE = PROJECT_ROOT / "users.db"
+# Определяем путь к базе данных
+import os
+if os.path.exists("/app/project/users.db"):
+    # Docker контейнер
+    DB_FILE = Path("/app/project/users.db")
+elif os.path.exists("users-20251005-173430.db"):
+    # Если есть файл с датой, используем его
+    DB_FILE = Path("users-20251005-173430.db")
+elif os.path.exists("users.db"):
+    # Иначе используем стандартный файл
+    DB_FILE = Path("users.db")
+else:
+    # Создаем новый файл
+    DB_FILE = Path("users.db")
 
 
 def _now_str() -> str:
@@ -164,6 +176,25 @@ def initialize_db():
                 )
             ''')
             cursor.execute('''
+                CREATE TABLE IF NOT EXISTS button_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    menu_type TEXT NOT NULL,
+                    button_id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    callback_data TEXT,
+                    url TEXT,
+                    row_position INTEGER DEFAULT 0,
+                    column_position INTEGER DEFAULT 0,
+                    button_width INTEGER DEFAULT 1,
+                    is_active INTEGER DEFAULT 1,
+                    sort_order INTEGER DEFAULT 0,
+                    metadata TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(menu_type, button_id)
+                )
+            ''')
+            cursor.execute('''
                 CREATE TABLE IF NOT EXISTS xui_hosts(
                     host_name TEXT PRIMARY KEY,
                     squad_uuid TEXT UNIQUE,
@@ -247,6 +278,23 @@ def initialize_db():
                 )
             ''')
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_host_speedtests_host_time ON host_speedtests(host_name, created_at DESC)")
+            # История метрик ресурсов (локально/хосты/ssh-цели)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS resource_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope TEXT NOT NULL,                -- 'local' | 'host' | 'target'
+                    object_name TEXT NOT NULL,          -- 'panel' | host_name | target_name
+                    cpu_percent REAL,
+                    mem_percent REAL,
+                    disk_percent REAL,
+                    load1 REAL,
+                    net_bytes_sent INTEGER,
+                    net_bytes_recv INTEGER,
+                    raw_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_resource_metrics_scope_time ON resource_metrics(scope, object_name, created_at DESC)")
             # Отдельные SSH-цели для спидтестов (не привязаны к xui_hosts)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS speedtest_ssh_targets (
@@ -298,6 +346,13 @@ def initialize_db():
                 "referral_reward_type": "percent_purchase",
                 "referral_on_start_referrer_amount": "20",
                 "backup_interval_days": "1",
+                # Monitoring
+                "monitoring_enabled": "true",
+                "monitoring_interval_sec": "300",
+                "monitoring_cpu_threshold": "90",
+                "monitoring_mem_threshold": "90",
+                "monitoring_disk_threshold": "90",
+                "monitoring_alert_cooldown_sec": "3600",
                 "remnawave_base_url": None,
                 "remnawave_api_token": None,
                 "remnawave_cookies": "{}",
@@ -342,6 +397,21 @@ def initialize_db():
                     (key, value),
                 )
             conn.commit()
+            
+            # Initialize default button configurations
+            initialize_default_button_configs()
+            
+            # Update existing my_keys button if it exists
+            update_existing_my_keys_button()
+            
+            # Миграция: добавляем поле button_width если его нет
+            try:
+                cursor.execute("ALTER TABLE button_configs ADD COLUMN button_width INTEGER DEFAULT 1")
+                logging.info("Added button_width column to button_configs table")
+            except sqlite3.OperationalError:
+                # Колонка уже существует
+                pass
+            
             logging.info("База данных инициализирована")
     except sqlite3.Error as e:
         logging.error("Не удалось инициализировать базу данных: %s", e)
@@ -556,6 +626,8 @@ def run_migration():
             _ensure_support_tickets_columns(cursor)
             _ensure_vpn_keys_schema(cursor)
             _ensure_ssh_targets_table(cursor)
+            _ensure_gift_tokens_table(cursor)
+            _ensure_promo_tables(cursor)
             # Ensure thread index exists (safe to create idempotently)
             try:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_thread ON support_tickets(forum_chat_id, message_thread_id)")
@@ -580,6 +652,104 @@ def run_migration():
             conn.commit()
     except sqlite3.Error as e:
         logging.error("Сбой миграции базы данных: %s", e)
+
+
+def insert_resource_metric(
+    scope: str,
+    object_name: str,
+    *,
+    cpu_percent: float | None = None,
+    mem_percent: float | None = None,
+    disk_percent: float | None = None,
+    load1: float | None = None,
+    net_bytes_sent: int | None = None,
+    net_bytes_recv: int | None = None,
+    raw_json: str | None = None,
+) -> int | None:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO resource_metrics (
+                    scope, object_name, cpu_percent, mem_percent, disk_percent, load1,
+                    net_bytes_sent, net_bytes_recv, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    (scope or '').strip(),
+                    (object_name or '').strip(),
+                    cpu_percent, mem_percent, disk_percent, load1,
+                    net_bytes_sent, net_bytes_recv, raw_json,
+                )
+            )
+            conn.commit()
+            return cursor.lastrowid
+    except sqlite3.Error as e:
+        logging.error("Failed to insert resource metric for %s/%s: %s", scope, object_name, e)
+        return None
+
+
+def get_latest_resource_metric(scope: str, object_name: str) -> dict | None:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT * FROM resource_metrics
+                WHERE scope = ? AND object_name = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                ''',
+                ((scope or '').strip(), (object_name or '').strip())
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except sqlite3.Error as e:
+        logging.error("Failed to get latest resource metric for %s/%s: %s", scope, object_name, e)
+        return None
+
+
+def get_metrics_series(scope: str, object_name: str, *, since_hours: int = 24, limit: int = 500) -> list[dict]:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Для 1-часового периода показываем все доступные данные за последние 2 часа
+            # чтобы гарантировать наличие данных
+            if since_hours == 1:
+                hours_filter = 2
+            else:
+                hours_filter = max(1, int(since_hours))
+            
+            # SQLite: filter by timestamp interval using datetime('now','-%d hours')
+            cursor.execute(
+                f'''
+                SELECT created_at, cpu_percent, mem_percent, disk_percent, load1
+                FROM resource_metrics
+                WHERE scope = ? AND object_name = ?
+                  AND created_at >= datetime('now', ?)
+                ORDER BY created_at ASC
+                LIMIT ?
+                ''',
+                (
+                    (scope or '').strip(),
+                    (object_name or '').strip(),
+                    f'-{hours_filter} hours',
+                    max(10, int(limit)),
+                )
+            )
+            rows = cursor.fetchall() or []
+            
+            # Отладочная информация
+            logging.debug(f"get_metrics_series: {scope}/{object_name}, since_hours={since_hours}, found {len(rows)} records")
+            
+            return [dict(r) for r in rows]
+    except sqlite3.Error as e:
+        logging.error("Failed to get metrics series for %s/%s: %s", scope, object_name, e)
+        return []
 
 
 def create_host(name: str, url: str, user: str, passwd: str, inbound: int, subscription_url: str | None = None):
@@ -989,6 +1159,80 @@ def _ensure_ssh_targets_table(cursor: sqlite3.Cursor) -> None:
         _ensure_table_column(cursor, "speedtest_ssh_targets", column, definition)
 
 
+def _ensure_gift_tokens_table(cursor: sqlite3.Cursor) -> None:
+    """Миграция для таблиц подарочных токенов."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gift_tokens (
+            token TEXT PRIMARY KEY,
+            host_name TEXT NOT NULL,
+            days INTEGER NOT NULL,
+            activation_limit INTEGER DEFAULT 1,
+            activations_used INTEGER DEFAULT 0,
+            expires_at TIMESTAMP,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_claimed_at TIMESTAMP,
+            comment TEXT
+        )
+        """
+    )
+    _ensure_index(cursor, "idx_gift_tokens_host", "gift_tokens", "host_name")
+    _ensure_index(cursor, "idx_gift_tokens_expires", "gift_tokens", "expires_at")
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gift_token_claims (
+            claim_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            key_id INTEGER,
+            claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(token) REFERENCES gift_tokens(token) ON DELETE CASCADE
+        )
+        """
+    )
+    _ensure_index(cursor, "idx_gift_token_claims_token", "gift_token_claims", "token")
+    _ensure_index(cursor, "idx_gift_token_claims_user", "gift_token_claims", "user_id")
+
+
+def _ensure_promo_tables(cursor: sqlite3.Cursor) -> None:
+    """Создание таблиц промокодов и истории их использования."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            code TEXT PRIMARY KEY,
+            discount_percent REAL,
+            discount_amount REAL,
+            usage_limit_total INTEGER,
+            usage_limit_per_user INTEGER,
+            used_total INTEGER DEFAULT 0,
+            valid_from TIMESTAMP,
+            valid_until TIMESTAMP,
+            is_active INTEGER DEFAULT 1,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            description TEXT
+        )
+        """
+    )
+    _ensure_index(cursor, "idx_promo_codes_valid", "promo_codes", "valid_until")
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS promo_code_usages (
+            usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            applied_amount REAL,
+            order_id TEXT,
+            used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(code) REFERENCES promo_codes(code) ON DELETE CASCADE
+        )
+        """
+    )
+    _ensure_index(cursor, "idx_promo_code_usages_code", "promo_code_usages", "code")
+    _ensure_index(cursor, "idx_promo_code_usages_user", "promo_code_usages", "user_id")
+
+
 def get_all_ssh_targets() -> list[dict]:
     """Вернуть все SSH-цели для спидтестов (включая неактивные), сортировка по sort_order, затем по имени."""
     try:
@@ -1321,6 +1565,7 @@ def is_admin(user_id: int) -> bool:
 # --- Pending transactions helpers (YooMoney, Telegram Stars) ---
 def create_payload_pending(payment_id: str, user_id: int, amount_rub: float | None, metadata: dict | None) -> bool:
     try:
+        print(f"[DEBUG] create_payload_pending called: payment_id={payment_id}, user_id={user_id}, amount_rub={amount_rub}, metadata={metadata}")
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             # Ensure table exists
@@ -1441,10 +1686,21 @@ def find_and_complete_ton_transaction(payment_id: str, amount_ton: float | None 
     return meta
 
 def find_and_complete_pending_transaction(payment_id: str) -> dict | None:
+    logging.info(f"🔍 Ищем ожидающую транзакцию: {payment_id}")
     meta = _get_pending_metadata(payment_id)
     if not meta:
+        logging.warning(f"❌ Ожидающая транзакция не найдена: {payment_id}")
         return None
-    _complete_pending(payment_id)
+    
+    user_id = meta.get('user_id', 'неизвестно')
+    amount = meta.get('price', 0)
+    logging.info(f"✅ Найдена ожидающая транзакция: пользователь {user_id}, сумма {amount:.2f} RUB")
+    
+    success = _complete_pending(payment_id)
+    if success:
+        logging.info(f"✅ Транзакция отмечена как оплаченная: {payment_id}")
+    else:
+        logging.error(f"❌ Не удалось отметить транзакцию как оплаченную: {payment_id}")
     return meta
 
 def get_latest_pending_for_user(user_id: int) -> dict | None:
@@ -1533,6 +1789,314 @@ def update_setting(key: str, value: str):
             logging.info(f"Setting '{key}' updated.")
     except sqlite3.Error as e:
         logging.error(f"Failed to update setting '{key}': {e}")
+
+# Button configuration functions
+def get_button_configs(menu_type: str) -> list[dict]:
+    """Get all button configurations for a specific menu type"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM button_configs 
+                WHERE menu_type = ? AND is_active = 1 
+                ORDER BY sort_order, row_position, column_position
+            """, (menu_type,))
+            results = [dict(row) for row in cursor.fetchall()]
+            # logging.info(f"get_button_configs({menu_type}): found {len(results)} active buttons")  # Убрано для уменьшения логов
+            return results
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get button configs for {menu_type}: {e}")
+        return []
+
+def get_button_config(menu_type: str, button_id: str) -> dict | None:
+    """Get a specific button configuration by menu_type and button_id"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM button_configs 
+                WHERE menu_type = ? AND button_id = ?
+            """, (menu_type, button_id))
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return None
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get button config for {menu_type}/{button_id}: {e}")
+        return None
+
+def create_button_config(menu_type: str, button_id: str, text: str, callback_data: str = None, 
+                        url: str = None, row_position: int = 0, column_position: int = 0, 
+                        button_width: int = 1, metadata: str = None) -> bool:
+    """Create a new button configuration"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO button_configs 
+                (menu_type, button_id, text, callback_data, url, row_position, column_position, button_width, metadata, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (menu_type, button_id, text, callback_data, url, row_position, column_position, button_width, metadata))
+            conn.commit()
+            logging.info(f"Button config created: {menu_type}/{button_id}")
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to create button config: {e}")
+        return False
+
+def update_button_config(button_id: int, text: str = None, callback_data: str = None, 
+                        url: str = None, row_position: int = None, column_position: int = None, 
+                        button_width: int = None, is_active: bool = None, sort_order: int = None, metadata: str = None) -> bool:
+    """Update an existing button configuration"""
+    try:
+        logging.info(f"update_button_config called for {button_id}: text={text}, callback_data={callback_data}, url={url}, row={row_position}, col={column_position}, active={is_active}, sort={sort_order}")
+        
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            
+            # Build dynamic update query
+            updates = []
+            params = []
+            
+            if text is not None:
+                updates.append("text = ?")
+                params.append(text)
+            if callback_data is not None:
+                updates.append("callback_data = ?")
+                params.append(callback_data)
+            if url is not None:
+                updates.append("url = ?")
+                params.append(url)
+            if row_position is not None:
+                updates.append("row_position = ?")
+                params.append(row_position)
+            if column_position is not None:
+                updates.append("column_position = ?")
+                params.append(column_position)
+            if button_width is not None:
+                updates.append("button_width = ?")
+                params.append(button_width)
+            if is_active is not None:
+                updates.append("is_active = ?")
+                params.append(1 if is_active else 0)
+            if sort_order is not None:
+                updates.append("sort_order = ?")
+                params.append(sort_order)
+            if metadata is not None:
+                updates.append("metadata = ?")
+                params.append(metadata)
+            
+            if not updates:
+                return True
+                
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(button_id)
+            
+            query = f"UPDATE button_configs SET {', '.join(updates)} WHERE id = ?"
+            logging.info(f"Executing query: {query} with params: {params}")
+            cursor.execute(query, params)
+            
+            if cursor.rowcount == 0:
+                logging.warning(f"No button found with id {button_id}")
+                return False
+                
+            conn.commit()
+            logging.info(f"Button config {button_id} updated successfully")
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update button config {button_id}: {e}")
+        return False
+
+def delete_button_config(button_id: int) -> bool:
+    """Delete a button configuration"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM button_configs WHERE id = ?", (button_id,))
+            conn.commit()
+            logging.info(f"Button config {button_id} deleted")
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to delete button config {button_id}: {e}")
+        return False
+
+def update_existing_my_keys_button():
+    """Update existing my_keys button to include key count template and set proper button widths"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            # Update my_keys button text
+            cursor.execute("""
+                UPDATE button_configs 
+                SET text = '🔑 Мои ключи ({len(user_keys)})', updated_at = CURRENT_TIMESTAMP
+                WHERE menu_type = 'main_menu' AND button_id = 'my_keys'
+            """)
+            if cursor.rowcount > 0:
+                logging.info("Updated my_keys button text to include key count template")
+            
+            # Update button widths for wide buttons
+            wide_buttons = [
+                ("trial", 2),      # Широкая кнопка
+                ("referral", 2),   # Широкая кнопка  
+                ("admin", 2),      # Широкая кнопка
+            ]
+            
+            for button_id, width in wide_buttons:
+                cursor.execute("""
+                    UPDATE button_configs 
+                    SET button_width = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE menu_type = 'main_menu' AND button_id = ?
+                """, (width, button_id))
+                if cursor.rowcount > 0:
+                    logging.info(f"Updated {button_id} button width to {width}")
+            
+            conn.commit()
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update button configurations: {e}")
+
+def reorder_button_configs(menu_type: str, button_orders: list[dict]) -> bool:
+    """Reorder button configurations for a menu type"""
+    try:
+        logging.info(f"Reordering {len(button_orders)} buttons for {menu_type}")
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            for order_data in button_orders:
+                button_id = order_data.get('button_id')
+                sort_order = order_data.get('sort_order', 0)
+                row_position = order_data.get('row_position', 0)
+                column_position = order_data.get('column_position', 0)
+                button_width = order_data.get('button_width', None)
+                
+                logging.info(f"Updating {button_id}: sort={sort_order}, row={row_position}, col={column_position}, width={button_width}")
+                
+                # Обновляем также button_width, если он передан из конструктора
+                if button_width is not None:
+                    cursor.execute(
+                        """
+                        UPDATE button_configs 
+                        SET sort_order = ?, row_position = ?, column_position = ?, button_width = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE menu_type = ? AND button_id = ?
+                        """,
+                        (sort_order, row_position, column_position, int(button_width), menu_type, button_id),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE button_configs 
+                        SET sort_order = ?, row_position = ?, column_position = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE menu_type = ? AND button_id = ?
+                        """,
+                        (sort_order, row_position, column_position, menu_type, button_id),
+                    )
+                
+                # Проверяем, была ли обновлена строка
+                if cursor.rowcount == 0:
+                    logging.warning(f"No button found with menu_type={menu_type}, button_id={button_id}")
+                else:
+                    logging.info(f"Updated button {button_id}")
+                    
+            conn.commit()
+            logging.info(f"Button configs reordered for {menu_type}")
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to reorder button configs for {menu_type}: {e}")
+        return False
+
+def initialize_default_button_configs():
+    """Initialize default button configurations for all menu types"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            
+            # Check if button configs already exist
+            cursor.execute("SELECT COUNT(*) FROM button_configs")
+            count = cursor.fetchone()[0]
+            if count > 0:
+                logging.info("Button configs already exist, skipping initialization")
+                return True
+            
+            # Main menu buttons - (button_id, text, callback_data, row_pos, col_pos, sort_order, button_width)
+            main_menu_buttons = [
+                ("trial", "🎁 Попробовать бесплатно", "get_trial", 0, 0, 0, 2),  # Широкая кнопка
+                ("profile", "👤 Мой профиль", "show_profile", 1, 0, 1, 1),
+                ("my_keys", "🔑 Мои ключи ({len(user_keys)})", "manage_keys", 1, 1, 2, 1),
+                ("buy_key", "🛒 Купить ключ", "buy_new_key", 2, 0, 3, 1),
+                ("topup", "💳 Пополнить баланс", "top_up_start", 2, 1, 4, 1),
+                ("referral", "🤝 Реферальная программа", "show_referral_program", 3, 0, 5, 2),  # Широкая кнопка
+                ("support", "🆘 Поддержка", "show_help", 4, 0, 6, 1),
+                ("about", "ℹ️ О проекте", "show_about", 4, 1, 7, 1),
+                ("speed", "⚡ Скорость", "user_speedtest_last", 5, 0, 8, 1),
+                ("howto", "❓ Как использовать", "howto_vless", 5, 1, 9, 1),
+                ("admin", "⚙️ Админка", "admin_menu", 6, 0, 10, 2),  # Широкая кнопка
+            ]
+            
+            for button_id, text, callback_data, row_pos, col_pos, sort_order, button_width in main_menu_buttons:
+                cursor.execute("""
+                    INSERT INTO button_configs 
+                    (menu_type, button_id, text, callback_data, row_position, column_position, sort_order, button_width, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """, ("main_menu", button_id, text, callback_data, row_pos, col_pos, sort_order, button_width))
+            
+            # Admin menu buttons
+            admin_menu_buttons = [
+                ("users", "👥 Пользователи", "admin_users", 0, 0, 0),
+                ("host_keys", "🌍 Ключи на хосте", "admin_host_keys", 0, 1, 1),
+                ("gift_key", "🎁 Выдать ключ", "admin_gift_key", 1, 0, 2),
+                ("promo", "🎟 Промокоды", "admin_promo_menu", 1, 1, 3),
+                ("speedtest", "⚡ Тест скорости", "admin_speedtest", 2, 0, 4),
+                ("monitor", "📊 Мониторинг", "admin_monitor", 2, 1, 5),
+                ("backup", "🗄 Бэкап БД", "admin_backup_db", 3, 0, 6),
+                ("restore", "♻️ Восстановить БД", "admin_restore_db", 3, 1, 7),
+                ("admins", "👮 Администраторы", "admin_admins_menu", 4, 0, 8),
+                ("broadcast", "📢 Рассылка", "start_broadcast", 4, 1, 9),
+                ("back_to_menu", "⬅️ Назад в меню", "back_to_main_menu", 5, 0, 10),
+            ]
+            
+            for button_id, text, callback_data, row_pos, col_pos, sort_order in admin_menu_buttons:
+                cursor.execute("""
+                    INSERT INTO button_configs 
+                    (menu_type, button_id, text, callback_data, row_position, column_position, sort_order, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                """, ("admin_menu", button_id, text, callback_data, row_pos, col_pos, sort_order))
+            
+            # Profile menu buttons
+            profile_menu_buttons = [
+                ("topup", "💳 Пополнить баланс", "top_up_start", 0, 0, 0),
+                ("referral", "🤝 Реферальная программа", "show_referral_program", 1, 0, 1),
+                ("back_to_menu", "⬅️ Назад в меню", "back_to_main_menu", 2, 0, 2),
+            ]
+            
+            for button_id, text, callback_data, row_pos, col_pos, sort_order in profile_menu_buttons:
+                cursor.execute("""
+                    INSERT INTO button_configs 
+                    (menu_type, button_id, text, callback_data, row_position, column_position, sort_order, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                """, ("profile_menu", button_id, text, callback_data, row_pos, col_pos, sort_order))
+            
+            # Support menu buttons
+            support_menu_buttons = [
+                ("new_ticket", "✍️ Новое обращение", "support_new_ticket", 0, 0, 0),
+                ("my_tickets", "📨 Мои обращения", "support_my_tickets", 1, 0, 1),
+                ("external", "🆘 Внешняя поддержка", "support_external", 2, 0, 2),
+                ("back_to_menu", "⬅️ Назад в меню", "back_to_main_menu", 3, 0, 3),
+            ]
+            
+            for button_id, text, callback_data, row_pos, col_pos, sort_order in support_menu_buttons:
+                cursor.execute("""
+                    INSERT INTO button_configs 
+                    (menu_type, button_id, text, callback_data, row_position, column_position, sort_order, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                """, ("support_menu", button_id, text, callback_data, row_pos, col_pos, sort_order))
+            
+            conn.commit()
+            logging.info("Default button configurations initialized")
+            return True
+            
+    except sqlite3.Error as e:
+        logging.error(f"Failed to initialize default button configs: {e}")
+        return False
 
 def create_plan(host_name: str, plan_name: str, months: int, price: float):
     try:
@@ -1724,13 +2288,31 @@ def set_balance(user_id: int, value: float) -> bool:
 
 def add_to_balance(user_id: int, amount: float) -> bool:
     try:
+        logging.info(f"💳 Добавляем {amount:.2f} RUB к балансу пользователя {user_id}")
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            cursor.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ?", (amount, user_id))
+            # Сначала проверим, существует ли пользователь
+            cursor.execute("SELECT telegram_id, balance FROM users WHERE telegram_id = ?", (int(user_id),))
+            user_row = cursor.fetchone()
+            if not user_row:
+                logging.error(f"❌ Пользователь {user_id} не найден в базе данных")
+                return False
+            
+            old_balance = user_row[1] or 0.0
+            cursor.execute(
+                "UPDATE users SET balance = COALESCE(balance, 0) + ? WHERE telegram_id = ?",
+                (float(amount), int(user_id))
+            )
             conn.commit()
-            return cursor.rowcount > 0
+            success = cursor.rowcount > 0
+            if success:
+                new_balance = old_balance + float(amount)
+                logging.info(f"✅ Баланс обновлен: пользователь {user_id} | {old_balance:.2f} → {new_balance:.2f} RUB (+{amount:.2f})")
+            else:
+                logging.error(f"❌ Не удалось обновить баланс для пользователя {user_id}: строки не затронуты")
+            return success
     except sqlite3.Error as e:
-        logging.error(f"Failed to add to balance for user {user_id}: {e}")
+        logging.error(f"💥 Ошибка базы данных при пополнении баланса для пользователя {user_id}: {e}")
         return False
 
 def deduct_from_balance(user_id: int, amount: float) -> bool:
@@ -1743,11 +2325,14 @@ def deduct_from_balance(user_id: int, amount: float) -> bool:
             cursor.execute("BEGIN IMMEDIATE")
             cursor.execute("SELECT balance FROM users WHERE telegram_id = ?", (user_id,))
             row = cursor.fetchone()
-            current = row[0] if row else 0.0
+            current = row[0] if row and row[0] is not None else 0.0
             if current < amount:
                 conn.rollback()
                 return False
-            cursor.execute("UPDATE users SET balance = balance - ? WHERE telegram_id = ?", (amount, user_id))
+            cursor.execute(
+                "UPDATE users SET balance = COALESCE(balance, 0) - ? WHERE telegram_id = ?",
+                (float(amount), int(user_id))
+            )
             conn.commit()
             return True
     except sqlite3.Error as e:
@@ -2355,6 +2940,76 @@ def get_all_users() -> list[dict]:
     except sqlite3.Error as e:
         logging.error(f"Failed to get all users: {e}")
         return []
+
+def get_users_paginated(page: int = 1, per_page: int = 30, q: str | None = None) -> tuple[list[dict], int]:
+    """Вернуть пользователей постранично и общее количество (с учётом фильтра).
+
+    Фильтр q ищет по username (LIKE) и по текстовому представлению telegram_id.
+    """
+    page = max(1, int(page or 1))
+    per_page = max(1, int(per_page or 30))
+    offset = (page - 1) * per_page
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if q:
+                q_like = f"%{q.strip()}%"
+                # total
+                cursor.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM users
+                    WHERE (username LIKE ?)
+                       OR (CAST(telegram_id AS TEXT) LIKE ?)
+                    """,
+                    (q_like, q_like),
+                )
+                total = cursor.fetchone()[0] or 0
+                # page data
+                cursor.execute(
+                    """
+                    SELECT *
+                    FROM users
+                    WHERE (username LIKE ?)
+                       OR (CAST(telegram_id AS TEXT) LIKE ?)
+                    ORDER BY registration_date DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (q_like, q_like, per_page, offset),
+                )
+            else:
+                cursor.execute("SELECT COUNT(*) FROM users")
+                total = cursor.fetchone()[0] or 0
+                cursor.execute(
+                    "SELECT * FROM users ORDER BY registration_date DESC LIMIT ? OFFSET ?",
+                    (per_page, offset),
+                )
+            users = [dict(row) for row in cursor.fetchall()]
+            return users, total
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get users paginated: {e}")
+        return [], 0
+
+def get_keys_counts_for_users(user_ids: list[int]) -> dict[int, int]:
+    """Вернуть словарь {user_id: keys_count} по списку пользователей."""
+    result: dict[int, int] = {}
+    if not user_ids:
+        return result
+    # SQLite ограничивает количество плейсхолдеров, но здесь страница мала (до сотен), это ок
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(user_ids))
+            query = f"SELECT user_id, COUNT(*) AS cnt FROM vpn_keys WHERE user_id IN ({placeholders}) GROUP BY user_id"
+            cursor.execute(query, tuple(int(x) for x in user_ids))
+            for row in cursor.fetchall() or []:
+                uid = int(row[0])
+                cnt = int(row[1] or 0)
+                result[uid] = cnt
+    except sqlite3.Error as e:
+        logging.error("Failed to get keys counts for users: %s", e)
+    return result
 
 def ban_user(telegram_id: int):
     try:

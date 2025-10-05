@@ -37,6 +37,7 @@
       <li class="nav-item"><a class="nav-link" href="#referrals">Рефералы</a></li>
       <li class="nav-item"><a class="nav-link" href="#trial">Триал</a></li>
       <li class="nav-item"><a class="nav-link" href="#content">Контент</a></li>
+      <li class="nav-item"><a class="nav-link" href="#monitoring">Мониторинг</a></li>
     </ul>
   </div>
 </div>
@@ -460,6 +461,49 @@
                               <div class="form-text text-secondary">Перед восстановлением текущая база автоматически сохраняется в /app/project/backups.</div>
                             </div>
                           </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="settings-section" id="monitoring">
+                <div class="card">
+                    <div class="card-header"><h2 class="card-title">Мониторинг ресурсов</h2></div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <input type="hidden" name="monitoring_enabled" value="false" />
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="monitoring_enabled" name="monitoring_enabled" value="true" {% if (settings.monitoring_enabled or 'true') == 'true' %}checked{% endif %}>
+                                <label class="form-check-label" for="monitoring_enabled">Включить мониторинг и алерты</label>
+                            </div>
+                        </div>
+
+                        <div class="row g-3">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label" for="monitoring_interval_sec">Интервал сбора (сек)</label>
+                                <input class="form-control pill" type="number" min="30" step="10" id="monitoring_interval_sec" name="monitoring_interval_sec" value="{{ settings.monitoring_interval_sec or '300' }}" />
+                                <div class="form-text">Как часто собирать метрики локально и по SSH.</div>
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label" for="monitoring_alert_cooldown_sec">Кулдаун алертов (сек)</label>
+                                <input class="form-control pill" type="number" min="60" step="60" id="monitoring_alert_cooldown_sec" name="monitoring_alert_cooldown_sec" value="{{ settings.monitoring_alert_cooldown_sec or '3600' }}" />
+                                <div class="form-text">Минимальная пауза между повторами одинаковых алертов.</div>
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mt-1">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label" for="monitoring_cpu_threshold">Порог CPU (%)</label>
+                                <input class="form-control pill" type="number" min="10" max="100" step="1" id="monitoring_cpu_threshold" name="monitoring_cpu_threshold" value="{{ settings.monitoring_cpu_threshold or '90' }}" />
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label" for="monitoring_mem_threshold">Порог RAM (%)</label>
+                                <input class="form-control pill" type="number" min="10" max="100" step="1" id="monitoring_mem_threshold" name="monitoring_mem_threshold" value="{{ settings.monitoring_mem_threshold or '90' }}" />
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label" for="monitoring_disk_threshold">Порог диска (%)</label>
+                                <input class="form-control pill" type="number" min="10" max="100" step="1" id="monitoring_disk_threshold" name="monitoring_disk_threshold" value="{{ settings.monitoring_disk_threshold or '90' }}" />
+                            </div>
                         </div>
                     </div>
                 </div>

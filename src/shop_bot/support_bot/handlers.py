@@ -21,6 +21,9 @@ from shop_bot.data_manager.remnawave_repository import (
     delete_ticket,
     is_admin,
     get_admin_ids,
+    get_user,
+    ban_user,
+    unban_user,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,15 @@ def get_support_router() -> Router:
             resize_keyboard=True
         )
 
+    def _is_user_banned(user_id: int) -> bool:
+        if not user_id:
+            return False
+        try:
+            user = get_user(int(user_id)) or {}
+        except Exception:
+            return False
+        return bool(user.get('is_banned'))
+
     def _get_latest_open_ticket(user_id: int) -> dict | None:
         try:
             tickets = get_user_tickets(user_id) or []
@@ -63,6 +75,17 @@ def get_support_router() -> Router:
             status = (t and t.get('status')) or 'open'
         except Exception:
             status = 'open'
+        try:
+            user_id = int((t or {}).get('user_id')) if t else None
+        except Exception:
+            user_id = None
+        is_banned = None
+        if user_id:
+            try:
+                user_info = get_user(user_id) or {}
+                is_banned = bool(user_info.get('is_banned'))
+            except Exception:
+                is_banned = None
         first_row: list[types.InlineKeyboardButton] = []
         if status == 'open':
             first_row.append(types.InlineKeyboardButton(text="✅ Закрыть", callback_data=f"admin_close_{ticket_id}"))
@@ -78,6 +101,15 @@ def get_support_router() -> Router:
             ],
             [types.InlineKeyboardButton(text="🗒 Заметки", callback_data=f"admin_notes_{ticket_id}")],
         ]
+        if user_id:
+            if is_banned:
+                inline_kb.append([
+                    types.InlineKeyboardButton(text="✅ Разбанить", callback_data=f"admin_unban_user_{ticket_id}")
+                ])
+            else:
+                inline_kb.append([
+                    types.InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_user_{ticket_id}")
+                ])
         return types.InlineKeyboardMarkup(inline_keyboard=inline_kb)
 
     async def _is_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
@@ -106,6 +138,16 @@ def get_support_router() -> Router:
                 await message.answer("📝 Кратко опишите тему обращения (например, 'Проблема с подключением')")
                 await state.set_state(SupportDialog.waiting_for_subject)
             return
+        if _is_user_banned(message.from_user.id):
+            banned_text = "🚫 Ваш аккаунт заблокирован. Вы не можете писать в поддержку через этого бота."
+            markup = _support_contact_markup()
+            if markup:
+                await message.answer(banned_text, reply_markup=markup)
+            else:
+                await message.answer(banned_text)
+            await state.clear()
+            return
+
         support_text = get_setting("support_text") or "Раздел поддержки. Вы можете создать обращение или открыть существующее."
         await message.answer(
             support_text,
@@ -121,6 +163,19 @@ def get_support_router() -> Router:
     @router.callback_query(F.data == "support_new_ticket")
     async def support_new_ticket_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
+        if _is_user_banned(callback.from_user.id):
+            text = "🚫 Ваш аккаунт заблокирован. Вы не можете писать в поддержку через этого бота."
+            try:
+                await callback.answer(text, show_alert=True)
+            except Exception:
+                pass
+            markup = _support_contact_markup()
+            if markup:
+                await callback.message.answer(text, reply_markup=markup)
+            else:
+                await callback.message.answer(text)
+            await state.clear()
+            return
         existing = _get_latest_open_ticket(callback.from_user.id)
         if existing:
             await callback.message.edit_text(
@@ -132,6 +187,15 @@ def get_support_router() -> Router:
 
     @router.message(SupportDialog.waiting_for_subject, F.chat.type == "private")
     async def support_subject_received(message: types.Message, state: FSMContext):
+        if _is_user_banned(message.from_user.id):
+            banned_text = "🚫 Ваш аккаунт заблокирован. Вы не можете писать в поддержку через этого бота."
+            markup = _support_contact_markup()
+            if markup:
+                await message.answer(banned_text, reply_markup=markup)
+            else:
+                await message.answer(banned_text)
+            await state.clear()
+            return
         subject = (message.text or "").strip()
         await state.update_data(subject=subject)
         await message.answer("✉️ Опишите проблему максимально подробно одним сообщением.")
@@ -139,6 +203,15 @@ def get_support_router() -> Router:
 
     @router.message(SupportDialog.waiting_for_message, F.chat.type == "private")
     async def support_message_received(message: types.Message, state: FSMContext, bot: Bot):
+        if _is_user_banned(message.from_user.id):
+            banned_text = "🚫 Ваш аккаунт заблокирован. Вы не можете писать в поддержку через этого бота."
+            markup = _support_contact_markup()
+            if markup:
+                await message.answer(banned_text, reply_markup=markup)
+            else:
+                await message.answer(banned_text)
+            await state.clear()
+            return
         user_id = message.from_user.id
         data = await state.get_data()
         raw_subject = (data.get("subject") or "").strip()
@@ -287,6 +360,19 @@ def get_support_router() -> Router:
         await callback.answer()
         ticket_id = int(callback.data.split("_")[-1])
         ticket = get_ticket(ticket_id)
+        if _is_user_banned(callback.from_user.id):
+            text = "🚫 Ваш аккаунт заблокирован. Вы не можете писать в поддержку через этого бота."
+            try:
+                await callback.answer(text, show_alert=True)
+            except Exception:
+                pass
+            markup = _support_contact_markup()
+            if markup:
+                await callback.message.edit_text(text, reply_markup=markup)
+            else:
+                await callback.message.edit_text(text)
+            await state.clear()
+            return
         if not ticket or ticket.get('user_id') != callback.from_user.id or ticket.get('status') != 'open':
             await callback.message.edit_text("Нельзя ответить на этот тикет.")
             return
@@ -296,6 +382,15 @@ def get_support_router() -> Router:
 
     @router.message(SupportDialog.waiting_for_reply, F.chat.type == "private")
     async def support_reply_received(message: types.Message, state: FSMContext, bot: Bot):
+        if _is_user_banned(message.from_user.id):
+            banned_text = "🚫 Ваш аккаунт заблокирован. Вы не можете писать в поддержку через этого бота."
+            markup = _support_contact_markup()
+            if markup:
+                await message.answer(banned_text, reply_markup=markup)
+            else:
+                await message.answer(banned_text)
+            await state.clear()
+            return
         data = await state.get_data()
         ticket_id = data.get('reply_ticket_id')
         ticket = get_ticket(ticket_id)
@@ -723,6 +818,105 @@ def get_support_router() -> Router:
         ) + f"Ссылка: {mention_link}"
         await callback.message.answer(text, parse_mode="Markdown")
 
+    def _support_contact_markup() -> types.InlineKeyboardMarkup | None:
+        support = (get_setting("support_bot_username") or get_setting("support_user") or "").strip()
+        if not support:
+            return None
+        url: str | None = None
+        if support.startswith("@"):
+            url = f"tg://resolve?domain={support[1:]}"
+        elif support.startswith("tg://"):
+            url = support
+        elif support.startswith("http://") or support.startswith("https://"):
+            try:
+                part = support.split("/")[-1].split("?")[0]
+                if part:
+                    url = f"tg://resolve?domain={part}"
+                else:
+                    url = support
+            except Exception:
+                url = support
+        else:
+            url = f"tg://resolve?domain={support}"
+        if not url:
+            return None
+        return types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🆘 Написать в поддержку", url=url)]])
+
+    async def _notify_user_about_ban(bot: Bot, user_id: int, text: str) -> None:
+        try:
+            markup = _support_contact_markup()
+            if markup:
+                await bot.send_message(user_id, text, reply_markup=markup)
+            else:
+                await bot.send_message(user_id, text)
+        except Exception:
+            pass
+
+    @router.callback_query(F.data.startswith("admin_ban_user_"))
+    async def admin_ban_user(callback: types.CallbackQuery, bot: Bot):
+        await callback.answer()
+        try:
+            ticket_id = int(callback.data.split("_")[-1])
+        except Exception:
+            return
+        ticket = get_ticket(ticket_id)
+        if not ticket:
+            return
+        forum_chat_id = int(ticket.get('forum_chat_id') or callback.message.chat.id)
+        if not await _is_admin(bot, forum_chat_id, callback.from_user.id):
+            return
+        try:
+            user_id = int(ticket.get('user_id'))
+        except Exception:
+            await callback.message.answer("❌ Не удалось определить пользователя тикета.")
+            return
+        try:
+            ban_user(user_id)
+        except Exception as e:
+            await callback.message.answer(f"❌ Не удалось забанить пользователя: {e}")
+            return
+        await callback.message.answer(f"🚫 Пользователь {user_id} забанен.")
+        # уведомим пользователя и обновим панель без дополнительных сообщений в треде
+        await _notify_user_about_ban(bot, user_id, "🚫 Ваш аккаунт был заблокирован администратором. Если это ошибка — свяжитесь с поддержкой.")
+        try:
+            await callback.message.edit_reply_markup(reply_markup=_admin_actions_kb(ticket_id))
+        except TelegramBadRequest:
+            pass
+
+    @router.callback_query(F.data.startswith("admin_unban_user_"))
+    async def admin_unban_user(callback: types.CallbackQuery, bot: Bot):
+        await callback.answer()
+        try:
+            ticket_id = int(callback.data.split("_")[-1])
+        except Exception:
+            return
+        ticket = get_ticket(ticket_id)
+        if not ticket:
+            return
+        forum_chat_id = int(ticket.get('forum_chat_id') or callback.message.chat.id)
+        if not await _is_admin(bot, forum_chat_id, callback.from_user.id):
+            return
+        try:
+            user_id = int(ticket.get('user_id'))
+        except Exception:
+            await callback.message.answer("❌ Не удалось определить пользователя тикета.")
+            return
+        try:
+            unban_user(user_id)
+        except Exception as e:
+            await callback.message.answer(f"❌ Не удалось разбанить пользователя: {e}")
+            return
+        await callback.message.answer(f"✅ Пользователь {user_id} разбанен.")
+        # только личное уведомление без дублирования в треде
+        try:
+            await bot.send_message(user_id, "✅ Ваш аккаунт был разблокирован. Вы снова можете пользоваться ботом.")
+        except Exception:
+            pass
+        try:
+            await callback.message.edit_reply_markup(reply_markup=_admin_actions_kb(ticket_id))
+        except TelegramBadRequest:
+            pass
+
     @router.callback_query(F.data.startswith("admin_note_"))
     async def admin_note_prompt(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
         await callback.answer()
@@ -830,6 +1024,16 @@ def get_support_router() -> Router:
 
         user_id = message.from_user.id if message.from_user else None
         if not user_id:
+            return
+
+        if _is_user_banned(user_id):
+            banned_text = "🚫 Ваш аккаунт заблокирован. Вы не можете писать в поддержку через этого бота."
+            markup = _support_contact_markup()
+            if markup:
+                await message.answer(banned_text, reply_markup=markup)
+            else:
+                await message.answer(banned_text)
+            await state.clear()
             return
 
         content = (message.text or message.caption or '')

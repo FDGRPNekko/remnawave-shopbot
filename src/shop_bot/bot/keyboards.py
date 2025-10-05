@@ -7,6 +7,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from shop_bot.data_manager.remnawave_repository import get_setting
+from shop_bot.data_manager.database import get_button_configs
 
 logger = logging.getLogger(__name__)
 
@@ -18,51 +19,62 @@ main_reply_keyboard = ReplyKeyboardMarkup(
 def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
-    if trial_available and get_setting("trial_enabled") == "true":
+    # Кнопка "Попробовать бесплатно" только если триал доступен и не использован
+    if trial_available:
         builder.button(text=(get_setting("btn_trial_text") or "🎁 Попробовать бесплатно"), callback_data="get_trial")
-
+    
+    # Строка 1: Мой профиль | Мои ключи
     builder.button(text=(get_setting("btn_profile_text") or "👤 Мой профиль"), callback_data="show_profile")
     base_my_keys = (get_setting("btn_my_keys_text") or "🔑 Мои ключи")
-    builder.button(text=f"{base_my_keys} ({len(user_keys)})", callback_data="manage_keys")
-    # Быстрые действия из главного меню
+    keys_count = len(user_keys) if user_keys else 0
+    builder.button(text=f"{base_my_keys} ({keys_count})", callback_data="manage_keys")
+    
+    # Строка 2: Купить ключ | Пополнить баланс
     builder.button(text=(get_setting("btn_buy_key_text") or "🛒 Купить ключ"), callback_data="buy_new_key")
     builder.button(text=(get_setting("btn_topup_text") or "💳 Пополнить баланс"), callback_data="top_up_start")
+    
+    # Строка 3: Реферальная программа (широкая кнопка)
     builder.button(text=(get_setting("btn_referral_text") or "🤝 Реферальная программа"), callback_data="show_referral_program")
+    
+    # Строка 4: Поддержка | О проекте
     builder.button(text=(get_setting("btn_support_text") or "🆘 Поддержка"), callback_data="show_help")
     builder.button(text=(get_setting("btn_about_text") or "ℹ️ О проекте"), callback_data="show_about")
-    # Просмотр результатов последнего спидтеста по SSH-целям
+    
+    # Строка 5: Скорость | Как использовать
     builder.button(text=(get_setting("btn_speed_text") or "⚡ Скорость"), callback_data="user_speedtest_last")
     builder.button(text=(get_setting("btn_howto_text") or "❓ Как использовать"), callback_data="howto_vless")
+    
+    # Строка 6: Админка (широкая кнопка, только для админов)
     if is_admin:
         builder.button(text=(get_setting("btn_admin_text") or "⚙️ Админка"), callback_data="admin_menu")
-    # Раскладка: trial (1), профиль+ключи (2), купить+пополнить (2), реферал (1), поддержка+о проекте (2), скорость+как использовать (2), админка (1)
-    layout = [
-        1 if trial_available and get_setting("trial_enabled") == "true" else 0,
-        2,  # профиль + ключи
-        2,  # купить + пополнить
-        1,  # рефералка
-        2,  # поддержка + о проекте
-        2,  # скорость + как использовать
-        1 if is_admin else 0,
-    ]
-    actual_layout = [size for size in layout if size > 0]
-    builder.adjust(*actual_layout)
+    
+    # Раскладка с учетом триала
+    layout = []
+    if trial_available:
+        layout.append(1)  # Триал (широкая кнопка)
+    layout.extend([2, 2, 1, 2, 2])  # Остальные строки
+    if is_admin:
+        layout.append(1)  # Админка (широкая кнопка)
+    
+    builder.adjust(*layout)
     
     return builder.as_markup()
 
 def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Пользователи", callback_data="admin_users")
-    builder.button(text="🌍 Ключи на хосте", callback_data="admin_host_keys")
     builder.button(text="🎁 Выдать ключ", callback_data="admin_gift_key")
     builder.button(text="⚡ Тест скорости", callback_data="admin_speedtest")
     builder.button(text="🗄 Бэкап БД", callback_data="admin_backup_db")
-    builder.button(text="♻️ Восстановить БД", callback_data="admin_restore_db")
     builder.button(text="👮 Администраторы", callback_data="admin_admins_menu")
+    builder.button(text="🌍 Ключи на хосте", callback_data="admin_host_keys")
+    builder.button(text="🎟 Промокоды", callback_data="admin_promo_menu")
+    builder.button(text="📊 Мониторинг", callback_data="admin_monitor")
+    builder.button(text="♻️ Восстановить БД", callback_data="admin_restore_db")
     builder.button(text="📢 Рассылка", callback_data="start_broadcast")
     builder.button(text=(get_setting("btn_back_to_menu_text") or "⬅️ Назад в меню"), callback_data="back_to_main_menu")
-    # 4 ряда по 2 кнопки (включая бэкап/восстановление), затем "Назад"
-    builder.adjust(2, 2, 2, 2, 1)
+    # Сетка 2x5 + широкая кнопка "Назад"
+    builder.adjust(2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 def create_admins_menu_keyboard() -> InlineKeyboardMarkup:
@@ -152,9 +164,81 @@ def create_admin_delete_key_confirm_keyboard(key_id: int) -> InlineKeyboardMarku
     builder.adjust(1)
     return builder.as_markup()
 
-def create_admin_cancel_keyboard() -> InlineKeyboardMarkup:
+def create_cancel_keyboard(callback: str = "admin_cancel") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отмена", callback_data=callback)
+    return builder.as_markup()
+
+
+def create_admin_cancel_keyboard() -> InlineKeyboardMarkup:
+    return create_cancel_keyboard("admin_cancel")
+
+
+def create_admin_promo_menu_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Создать промокод", callback_data="admin_promo_create")
+    builder.button(text="📋 Список промокодов", callback_data="admin_promo_list")
+    builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def create_admin_promo_discount_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="% Процент", callback_data="admin_promo_discount_percent")
+    builder.button(text="₽ Фиксированная", callback_data="admin_promo_discount_amount")
     builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+def create_admin_promo_code_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Сгенерировать автоматически", callback_data="admin_promo_code_auto")
+    builder.button(text="✍️ Ввести вручную", callback_data="admin_promo_code_custom")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(1, 1, 1)
+    return builder.as_markup()
+
+def create_admin_promo_limit_keyboard(kind: str) -> InlineKeyboardMarkup:
+    # kind: "total" | "user"
+    prefix = "admin_promo_limit_total_" if kind == "total" else "admin_promo_limit_user_"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="♾ Без лимита", callback_data=f"{prefix}inf")
+    for v in (1, 5, 10, 50, 100):
+        builder.button(text=str(v), callback_data=f"{prefix}{v}")
+    builder.button(text="✍️ Другое число", callback_data=f"{prefix}custom")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(2, 3, 1, 1)
+    return builder.as_markup()
+
+def create_admin_promo_valid_from_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⏱ Сейчас", callback_data="admin_promo_valid_from_now")
+    builder.button(text="🗓 Сегодня 00:00", callback_data="admin_promo_valid_from_today")
+    builder.button(text="🗓 Завтра 00:00", callback_data="admin_promo_valid_from_tomorrow")
+    builder.button(text="➡️ Пропустить", callback_data="admin_promo_valid_from_skip")
+    builder.button(text="✍️ Другая дата", callback_data="admin_promo_valid_from_custom")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(2, 2, 2)
+    return builder.as_markup()
+
+def create_admin_promo_valid_until_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="+1 день", callback_data="admin_promo_valid_until_plus1d")
+    builder.button(text="+7 дней", callback_data="admin_promo_valid_until_plus7d")
+    builder.button(text="+30 дней", callback_data="admin_promo_valid_until_plus30d")
+    builder.button(text="➡️ Пропустить", callback_data="admin_promo_valid_until_skip")
+    builder.button(text="✍️ Другая дата", callback_data="admin_promo_valid_until_custom")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(3, 2, 1)
+    return builder.as_markup()
+
+def create_admin_promo_description_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➡️ Пропустить", callback_data="admin_promo_desc_skip")
+    builder.button(text="✍️ Ввести текст", callback_data="admin_promo_desc_custom")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(1)
     return builder.as_markup()
 
 def create_broadcast_options_keyboard() -> InlineKeyboardMarkup:
@@ -299,6 +383,7 @@ def create_payment_method_keyboard(
     show_balance: bool | None = None,
     main_balance: float | None = None,
     price: float | None = None,
+    promo_applied: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -342,6 +427,10 @@ def create_payment_method_keyboard(
         builder.button(text="⭐ Telegram Stars", callback_data="pay_stars")
     if pm.get("yoomoney"):
         builder.button(text="💜 ЮMoney (кошелёк)", callback_data="pay_yoomoney")
+
+    # Промокод — доступен, если ещё не применён
+    if not promo_applied:
+        builder.button(text="🎟 Ввести промокод", callback_data="enter_promo_code")
 
     builder.button(text="⬅️ Назад", callback_data="back_to_email_prompt")
     builder.adjust(1)
@@ -560,7 +649,7 @@ def create_admin_ssh_targets_keyboard(ssh_targets: list[dict]) -> InlineKeyboard
         builder.button(text="SSH-целей нет", callback_data="noop")
     # Кнопка запуска для всех SSH-целей
     builder.button(text="🚀 Запустить для всех", callback_data="admin_speedtest_run_all_targets")
-    builder.button(text="⬅️ К хостам", callback_data="admin_speedtest")
+    builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
     # по 2 в ряд для целей, затем 1 для "назад"
     rows = [2] * (len(ssh_targets) if ssh_targets else 1)
     rows.extend([1, 1])
@@ -625,3 +714,116 @@ def create_admin_months_pick_keyboard(action: str = "gift") -> InlineKeyboardMar
     builder.button(text="⬅️ Назад", callback_data=f"admin_{action}_back_to_hosts")
     builder.adjust(2, 2, 1)
     return builder.as_markup()
+
+# Dynamic keyboard generation based on database configuration
+def create_dynamic_keyboard(menu_type: str, user_keys: list = None, trial_available: bool = False, is_admin: bool = False) -> InlineKeyboardMarkup:
+    """Create a keyboard based on database configuration"""
+    try:
+        button_configs = get_button_configs(menu_type)
+        # logger.info(f"Dynamic keyboard for {menu_type}: found {len(button_configs)} buttons")  # Убрано для уменьшения логов
+        
+        if not button_configs:
+            logger.warning(f"No button configs found for {menu_type}, using fallback")
+            # Fallback to default keyboard if no config found
+            if menu_type == "main_menu":
+                return create_main_menu_keyboard(user_keys or [], trial_available, is_admin)
+            elif menu_type == "admin_menu":
+                return create_admin_menu_keyboard()
+            elif menu_type == "profile_menu":
+                return create_profile_keyboard()
+            elif menu_type == "support_menu":
+                return create_support_menu_keyboard()
+            else:
+                return create_back_to_menu_keyboard()
+
+        builder = InlineKeyboardBuilder()
+        
+        # Group buttons by row_position for proper layout
+        rows: dict[int, list[dict]] = {}
+        for config in button_configs:
+            row_pos = config.get('row_position', 0)
+            rows.setdefault(row_pos, []).append(config)
+
+        # Add buttons row by row and compute layout only for actually added buttons
+        layout: list[int] = []  # kept for logging only
+        for row_pos in sorted(rows.keys()):
+            original_row = sorted(rows[row_pos], key=lambda x: x.get('column_position', 0))
+            included_row: list[dict] = []
+            row_buttons_objs: list[InlineKeyboardButton] = []
+
+            # logger.info(f"Row {row_pos}: {len(original_row)} configs before filtering")  # Убрано для уменьшения логов
+
+            for cfg in original_row:
+                text = cfg.get('text', '')
+                callback_data = cfg.get('callback_data')
+                url = cfg.get('url')
+                button_id = cfg.get('button_id', '')
+
+                # Skip trial when not available
+                if menu_type == "main_menu" and button_id == "trial" and not trial_available:
+                    # logger.info("Skipping trial button - trial not available")  # Убрано для уменьшения логов
+                    continue
+                
+                # Skip admin button when user is not admin
+                if menu_type == "main_menu" and button_id == "admin" and not is_admin:
+                    # logger.info("Skipping admin button - user is not admin")  # Убрано для уменьшения логов
+                    continue
+
+                # Dynamic text processing (e.g., key count)
+                if menu_type == "main_menu" and user_keys is not None and "({len(user_keys)})" in text:
+                    keys_count = len(user_keys) if user_keys else 0
+                    text = text.replace("({len(user_keys)})", f"({keys_count})")
+
+                if url:
+                    row_buttons_objs.append(InlineKeyboardButton(text=text, url=url))
+                    included_row.append(cfg)
+                elif callback_data:
+                    row_buttons_objs.append(InlineKeyboardButton(text=text, callback_data=callback_data))
+                    included_row.append(cfg)
+
+            # Skip empty rows (e.g., when the only button was trial and it was filtered out)
+            if not included_row:
+                continue
+
+            has_wide = any(int(b.get('button_width', 1) or 1) > 1 for b in included_row)
+            if has_wide and row_buttons_objs:
+                # Wide row: only first button occupies the whole row
+                builder.row(row_buttons_objs[0])
+                layout.append(1)
+            else:
+                # Normal row: up to 2 buttons side by side
+                if len(row_buttons_objs) >= 2:
+                    builder.row(row_buttons_objs[0], row_buttons_objs[1])
+                    layout.append(2)
+                else:
+                    builder.row(*row_buttons_objs)
+                    layout.append(len(row_buttons_objs))
+
+        # logger.info(f"Final layout (added buttons per row): {layout}")  # Убрано для уменьшения логов
+
+        # logger.info(f"Dynamic keyboard created successfully for {menu_type}")  # Убрано для уменьшения логов
+        return builder.as_markup()
+        
+    except Exception as e:
+        logger.error(f"Error creating dynamic keyboard for {menu_type}: {e}")
+        # Fallback to default keyboard
+        if menu_type == "main_menu":
+            return create_main_menu_keyboard(user_keys or [], trial_available, is_admin)
+        else:
+            return create_back_to_menu_keyboard()
+
+def create_dynamic_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: bool) -> InlineKeyboardMarkup:
+    """Create main menu keyboard using dynamic configuration"""
+    return create_dynamic_keyboard("main_menu", user_keys, trial_available, is_admin)
+
+def create_dynamic_admin_menu_keyboard() -> InlineKeyboardMarkup:
+    """Create admin menu keyboard using dynamic configuration"""
+    return create_dynamic_keyboard("admin_menu")
+
+def create_dynamic_profile_keyboard() -> InlineKeyboardMarkup:
+    """Create profile keyboard using dynamic configuration"""
+    return create_dynamic_keyboard("profile_menu")
+
+def create_dynamic_support_menu_keyboard() -> InlineKeyboardMarkup:
+    """Create support menu keyboard using dynamic configuration"""
+    return create_dynamic_keyboard("support_menu")
