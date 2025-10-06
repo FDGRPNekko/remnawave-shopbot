@@ -63,15 +63,15 @@ class Broadcast(StatesGroup):
 def get_admin_router() -> Router:
     admin_router = Router()
 
-    # Helper: форматирование упоминания пользователя (инициатора)
+
     def _format_user_mention(u: types.User) -> str:
         try:
             if u.username:
                 uname = u.username.lstrip('@')
                 return f"@{uname}"
-            # Fallback: кликабельная ссылка по ID с читаемым именем
+
             full_name = (u.full_name or u.first_name or "Администратор").strip()
-            # html_escape — это модуль, импортированный как html; у него есть .escape
+
             try:
                 safe_name = html_escape.escape(full_name)
             except Exception:
@@ -80,7 +80,7 @@ def get_admin_router() -> Router:
         except Exception:
             return str(getattr(u, 'id', '—'))
 
-    # Helper: по хешу (sha1) найти имя SSH-цели
+
     def _resolve_target_from_hash(cb_data: str) -> str | None:
         try:
             digest = cb_data.split(':', 1)[1]
@@ -101,7 +101,7 @@ def get_admin_router() -> Router:
         return None
 
     async def show_admin_menu(message: types.Message, edit_message: bool = False):
-        # Собираем статистику для отображения прямо в админ-меню
+
         stats = get_admin_stats() or {}
         today_new = stats.get('today_new_users', 0)
         today_income = float(stats.get('today_income', 0) or 0)
@@ -124,7 +124,7 @@ def get_admin_router() -> Router:
             "<b>Состояние ключей:</b>\n"
             f"✅ Активных: {active_keys}"
         )
-        # Используем динамическую клавиатуру, если доступна, иначе fallback к статической
+
         try:
             keyboard = keyboards.create_dynamic_admin_menu_keyboard()
         except Exception as e:
@@ -239,7 +239,7 @@ def get_admin_router() -> Router:
         await callback.answer()
         await show_admin_menu(callback.message, edit_message=True)
 
-    # --- Промокоды ---
+
     class AdminPromoCreate(StatesGroup):
         waiting_for_code = State()
         waiting_for_discount_type = State()
@@ -630,7 +630,7 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_cancel_keyboard()
             )
             return
-        # skip
+
         await state.update_data(description=None)
         data = await state.get_data()
         code = data.get('promo_code')
@@ -779,14 +779,14 @@ def get_admin_router() -> Router:
             parse_mode='HTML'
         )
 
-    # --- Speedtest: кнопка в админ-меню -> выбор хоста ---
+
     @admin_router.callback_query(F.data == "admin_speedtest")
     async def admin_speedtest_entry(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
-        # Переходим сразу к списку SSH-целей
+
         targets = get_all_ssh_targets() or []
         try:
             await callback.message.edit_text(
@@ -799,7 +799,7 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_ssh_targets_keyboard(targets)
             )
 
-    # --- Speedtest: SSH targets list ---
+
     @admin_router.callback_query(F.data == "admin_speedtest_ssh_targets")
     async def admin_speedtest_ssh_targets(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -818,7 +818,7 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_ssh_targets_keyboard(targets)
             )
 
-    # --- Speedtest: запуск по выбранному хосту ---
+
     @admin_router.callback_query(F.data.startswith("admin_speedtest_pick_host_"))
     async def admin_speedtest_run(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -827,7 +827,7 @@ def get_admin_router() -> Router:
         await callback.answer()
         host_name = callback.data.replace("admin_speedtest_pick_host_", "", 1)
 
-        # Уведомление всем администраторам о старте
+
         try:
             from shop_bot.data_manager.remnawave_repository import get_admin_ids
             admin_ids = list({*(get_admin_ids() or []), int(callback.from_user.id)})
@@ -841,19 +841,19 @@ def get_admin_router() -> Router:
             except Exception:
                 pass
 
-        # Локальный статус
+
         try:
             wait_msg = await callback.message.answer(f"⏳ Выполняю тест скорости для <b>{host_name}</b>…")
         except Exception:
             wait_msg = None
 
-        # Выполнить тест (SSH + NET) и сохранить в БД
+
         try:
             result = await speedtest_runner.run_both_for_host(host_name)
         except Exception as e:
             result = {"ok": False, "error": str(e), "details": {}}
 
-        # Текст результата
+
         def fmt_part(title: str, d: dict | None) -> str:
             if not d:
                 return f"<b>{title}:</b> —"
@@ -876,14 +876,14 @@ def get_admin_router() -> Router:
             + fmt_part("NET", details.get('net'))
         )
 
-        # Локально обновим сообщение
-        # Лог о завершении
+
+
         if result.get('ok'):
             logger.info(f"Bot/Admin: спидтест для SSH-цели '{host_name}' завершён успешно")
         else:
             logger.warning(f"Bot/Admin: спидтест для SSH-цели '{host_name}' завершился с ошибкой: {result.get('error')}")
 
-        # Лог о завершении
+
         if result.get('ok'):
             logger.info(f"Bot/Admin: спидтест (legacy) для SSH-цели '{host_name}' завершён успешно")
         else:
@@ -897,7 +897,7 @@ def get_admin_router() -> Router:
         else:
             await callback.message.answer(text_res)
 
-        # Разослать финал всем админам
+
         for aid in admin_ids:
             if wait_msg and aid == callback.from_user.id:
                 continue
@@ -906,7 +906,7 @@ def get_admin_router() -> Router:
             except Exception:
                 pass
 
-    # --- Speedtest: запуск по SSH-цели (хешированный callback) ---
+
     @admin_router.callback_query(F.data.startswith("stt:"))
     async def admin_speedtest_run_target_hashed(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -918,7 +918,7 @@ def get_admin_router() -> Router:
             await callback.message.answer("❌ Цель не найдена")
             return
 
-        # Оповещение администраторов о старте
+
         logger.info(f"Bot/Admin: запуск спидтеста для SSH-цели '{target_name}' (инициатор id={callback.from_user.id})")
         try:
             from shop_bot.data_manager.remnawave_repository import get_admin_ids
@@ -933,13 +933,13 @@ def get_admin_router() -> Router:
             except Exception:
                 pass
 
-        # Локальный статус
+
         try:
             wait_msg = await callback.message.answer(f"⏳ Выполняю тест скорости для SSH-цели <b>{target_name}</b>…")
         except Exception:
             wait_msg = None
 
-        # Выполнить тест (только SSH) и сохранить в БД
+
         try:
             result = await speedtest_runner.run_and_store_ssh_speedtest_for_target(target_name)
         except Exception as e:
@@ -977,7 +977,7 @@ def get_admin_router() -> Router:
             except Exception:
                 pass
 
-    # --- Speedtest: запуск по SSH-цели ---
+
     @admin_router.callback_query(F.data.startswith("admin_speedtest_pick_target_"))
     async def admin_speedtest_run_target(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -986,7 +986,7 @@ def get_admin_router() -> Router:
         await callback.answer()
         target_name = callback.data.replace("admin_speedtest_pick_target_", "", 1)
 
-        # Оповещение администраторов о старте
+
         logger.info(f"Bot/Admin: запуск спидтеста (legacy) для SSH-цели '{target_name}' (инициатор id={callback.from_user.id})")
         try:
             from shop_bot.data_manager.remnawave_repository import get_admin_ids
@@ -1001,19 +1001,19 @@ def get_admin_router() -> Router:
             except Exception:
                 pass
 
-        # Локальный статус
+
         try:
             wait_msg = await callback.message.answer(f"⏳ Выполняю тест скорости для SSH-цели <b>{target_name}</b>…")
         except Exception:
             wait_msg = None
 
-        # Выполнить тест (только SSH) и сохранить в БД
+
         try:
             result = await speedtest_runner.run_and_store_ssh_speedtest_for_target(target_name)
         except Exception as e:
             result = {"ok": False, "error": str(e)}
 
-        # Формирование текста
+
         if not result.get("ok"):
             text_res = f"🏁 Тест скорости (SSH-цель) завершён для <b>{target_name}</b>\n❌ {result.get('error') or 'ошибка'}"
         else:
@@ -1030,7 +1030,7 @@ def get_admin_router() -> Router:
                 f"• сервер: {srv}"
             )
 
-        # Обновление сообщения/ответ
+
         if wait_msg:
             try:
                 await wait_msg.edit_text(text_res)
@@ -1039,7 +1039,7 @@ def get_admin_router() -> Router:
         else:
             await callback.message.answer(text_res)
 
-        # Разослать финал всем админам
+
         for aid in admin_ids:
             if wait_msg and aid == callback.from_user.id:
                 continue
@@ -1048,7 +1048,7 @@ def get_admin_router() -> Router:
             except Exception:
                 pass
 
-    # --- Speedtest: Назад из выбора хоста ---
+
     @admin_router.callback_query(F.data == "admin_speedtest_back_to_users")
     async def admin_speedtest_back(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1057,14 +1057,14 @@ def get_admin_router() -> Router:
         await callback.answer()
         await show_admin_menu(callback.message, edit_message=True)
 
-    # --- Speedtest: Запуск для всех хостов ---
+
     @admin_router.callback_query(F.data == "admin_speedtest_run_all")
     async def admin_speedtest_run_all(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
-        # оповещение админам
+
         try:
             from shop_bot.data_manager.remnawave_repository import get_admin_ids
             admin_ids = list({*(get_admin_ids() or []), int(callback.from_user.id)})
@@ -1077,7 +1077,7 @@ def get_admin_router() -> Router:
                 await callback.bot.send_message(aid, start_text)
             except Exception:
                 pass
-        # пробежимся по хостам
+
         hosts = get_all_hosts() or []
         summary_lines = []
         for h in hosts:
@@ -1094,7 +1094,7 @@ def get_admin_router() -> Router:
         text = "🏁 Тест для всех завершён:\n" + "\n".join(summary_lines)
         await callback.message.answer(text)
         for aid in admin_ids:
-            # Не дублируем результат инициатору/в текущий чат
+
             if aid == callback.from_user.id or aid == callback.message.chat.id:
                 continue
             try:
@@ -1102,14 +1102,14 @@ def get_admin_router() -> Router:
             except Exception:
                 pass
 
-    # --- Speedtest: Запуск для всех SSH-целей ---
+
     @admin_router.callback_query(F.data == "admin_speedtest_run_all_targets")
     async def admin_speedtest_run_all_targets(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
-        # Оповещение админам
+
         try:
             from shop_bot.data_manager.remnawave_repository import get_admin_ids
             admin_ids = list({*(get_admin_ids() or []), int(callback.from_user.id)})
@@ -1123,7 +1123,7 @@ def get_admin_router() -> Router:
                 await callback.bot.send_message(aid, start_text)
             except Exception:
                 pass
-        # Пробежаться по целям
+
         targets = get_all_ssh_targets() or []
         summary_lines = []
         ok_total = 0
@@ -1152,7 +1152,7 @@ def get_admin_router() -> Router:
             except Exception:
                 pass
 
-    # --- Бэкап БД: ручной запуск ---
+
     @admin_router.callback_query(F.data == "admin_backup_db")
     async def admin_backup_db(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1170,7 +1170,7 @@ def get_admin_router() -> Router:
             else:
                 await callback.message.answer("❌ Не удалось создать бэкап БД")
             return
-        # Отправим всем администраторам
+
         try:
             sent = await backup_manager.send_backup_to_admins(callback.bot, zip_path)
         except Exception:
@@ -1184,7 +1184,7 @@ def get_admin_router() -> Router:
         else:
             await callback.message.answer(txt)
 
-    # --- Восстановление БД ---
+
     class AdminRestoreDB(StatesGroup):
         waiting_file = State()
 
@@ -1235,7 +1235,7 @@ def get_admin_router() -> Router:
         else:
             await message.answer("❌ Восстановление не удалось. Проверьте файл и повторите.")
 
-    # --- Speedtest: Автоустановка speedtest на выбранном хосте ---
+
     @admin_router.callback_query(F.data.startswith("admin_speedtest_autoinstall_"))
     async def admin_speedtest_autoinstall(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1260,7 +1260,7 @@ def get_admin_router() -> Router:
             except Exception:
                 await callback.message.answer(text)
 
-    # --- Speedtest: Автоустановка на SSH-цели ---
+
     @admin_router.callback_query(F.data.startswith("admin_speedtest_autoinstall_target_"))
     async def admin_speedtest_autoinstall_target(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1292,7 +1292,7 @@ def get_admin_router() -> Router:
         else:
             await callback.message.answer(text)
 
-    # --- Speedtest: Автоустановка на SSH-цели (хешированный callback) ---
+
     @admin_router.callback_query(F.data.startswith("stti:"))
     async def admin_speedtest_autoinstall_target_hashed(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1323,7 +1323,7 @@ def get_admin_router() -> Router:
             await callback.message.answer(text)
 
 
-    # --- Пользователи: список, пагинация, просмотр ---
+
     @admin_router.callback_query(F.data.startswith("admin_users"))
     async def admin_users_handler(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
@@ -1357,9 +1357,9 @@ def get_admin_router() -> Router:
         if not user:
             await callback.message.answer("❌ Пользователь не найден")
             return
-        # Собираем краткую информацию
+
         username = user.get('username') or '—'
-        # Формируем кликабельный тег пользователя
+
         if user.get('username'):
             uname = user.get('username').lstrip('@')
             user_tag = f"<a href='https://t.me/{uname}'>@{uname}</a>"
@@ -1385,7 +1385,7 @@ def get_admin_router() -> Router:
             reply_markup=keyboards.create_admin_user_actions_keyboard(user_id, is_banned=is_banned)
         )
 
-    # --- Бан/разбан пользователя ---
+
     @admin_router.callback_query(F.data.startswith("admin_ban_user_"))
     async def admin_ban_user(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1401,13 +1401,13 @@ def get_admin_router() -> Router:
             ban_user(user_id)
             await callback.message.answer(f"🚫 Пользователь {user_id} забанен")
             try:
-                # Уведомление пользователю: только кнопка поддержки, без "Назад в меню"
+
                 from shop_bot.data_manager.remnawave_repository import get_setting as _get_setting
                 support = (_get_setting("support_bot_username") or _get_setting("support_user") or "").strip()
                 kb = InlineKeyboardBuilder()
                 url = None
                 if support:
-                    if support.startswith("@"):  # @username
+                    if support.startswith("@"):
                         url = f"tg://resolve?domain={support[1:]}"
                     elif support.startswith("tg://"):
                         url = support
@@ -1434,7 +1434,7 @@ def get_admin_router() -> Router:
         except Exception as e:
             await callback.message.answer(f"❌ Не удалось забанить пользователя: {e}")
             return
-        # Обновить карточку пользователя
+
         user = get_user(user_id) or {}
         username = user.get('username') or '—'
         if user.get('username'):
@@ -1464,7 +1464,7 @@ def get_admin_router() -> Router:
         except Exception:
             pass
 
-    # --- Подменю администраторов ---
+
     @admin_router.callback_query(F.data == "admin_admins_menu")
     async def admin_admins_menu_entry(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1504,7 +1504,7 @@ def get_admin_router() -> Router:
                     tag = f"<a href='tg://user?id={aid}'>Профиль</a>"
                 lines.append(f"• ID: {aid} — {tag}")
             text = "📋 <b>Администраторы</b>:\n" + "\n".join(lines)
-        # Кнопки назад
+
         kb = InlineKeyboardBuilder()
         kb.button(text="⬅️ Назад", callback_data="admin_admins_menu")
         kb.button(text="⬅️ В админ-меню", callback_data="admin_menu")
@@ -1529,7 +1529,7 @@ def get_admin_router() -> Router:
             unban_user(user_id)
             await callback.message.answer(f"✅ Пользователь {user_id} разбанен")
             try:
-                # Отправляем пользователю уведомление о разбане с кнопкой в главное меню
+
                 kb = InlineKeyboardBuilder()
                 kb.row(keyboards.get_main_menu_button())
                 await callback.bot.send_message(
@@ -1542,10 +1542,10 @@ def get_admin_router() -> Router:
         except Exception as e:
             await callback.message.answer(f"❌ Не удалось разбанить пользователя: {e}")
             return
-        # Обновить карточку пользователя
+
         user = get_user(user_id) or {}
         username = user.get('username') or '—'
-        # Формируем кликабельный тег пользователя
+
         if user.get('username'):
             uname = user.get('username').lstrip('@')
             user_tag = f"<a href='https://t.me/{uname}'>@{uname}</a>"
@@ -1573,7 +1573,7 @@ def get_admin_router() -> Router:
         except Exception:
             pass
 
-    # --- Ключи пользователя: список и карточка ключа ---
+
     @admin_router.callback_query(F.data.startswith("admin_user_keys_"))
     async def admin_user_keys(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1612,7 +1612,7 @@ def get_admin_router() -> Router:
             total_ref_earned = float(get_referral_balance_all(user_id) or 0)
         except Exception:
             total_ref_earned = 0.0
-        # Сформируем список с ограничением по длине
+
         max_items = 30
         lines = []
         for r in refs[:max_items]:
@@ -1629,7 +1629,7 @@ def get_admin_router() -> Router:
             + ("\n".join(lines) if lines else "Пока нет рефералов")
             + more_suffix
         )
-        # Кнопки: назад к карточке пользователя и в админ-меню
+
         kb = InlineKeyboardBuilder()
         kb.button(text="⬅️ К пользователю", callback_data=f"admin_view_user_{user_id}")
         kb.button(text="⬅️ В админ-меню", callback_data="admin_menu")
@@ -1672,8 +1672,8 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
             )
 
-    # --- Удаление ключа: подтверждение (prompt) ---
-    # Матчим только вариант admin_key_delete_{id}, без confirm/cancel
+
+
     @admin_router.callback_query(F.data.regexp(r"^admin_key_delete_\d+$"))
     async def admin_key_delete_prompt(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1704,7 +1704,7 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_delete_key_confirm_keyboard(key_id)
             )
 
-    # --- Продление конкретного ключа из карточки ---
+
     class AdminExtendSingleKey(StatesGroup):
         waiting_days = State()
 
@@ -1755,7 +1755,7 @@ def get_admin_router() -> Router:
             await message.answer("❌ У ключа отсутствует сервер или email")
             await state.clear()
             return
-        # Продление на хосте
+
         try:
             resp = await create_or_update_key_on_host(host, email, days_to_add=days)
         except Exception as e:
@@ -1764,7 +1764,7 @@ def get_admin_router() -> Router:
         if not resp or not resp.get('client_uuid') or not resp.get('expiry_timestamp_ms'):
             await message.answer("❌ Не удалось продлить ключ на сервере")
             return
-        # Обновление в БД
+
         if not rw_repo.update_key(
             key_id,
             remnawave_user_uuid=resp['client_uuid'],
@@ -1773,7 +1773,7 @@ def get_admin_router() -> Router:
             await message.answer("❌ Не удалось обновить информацию о ключе.")
             return
         await state.clear()
-        # Повторный показ карточки ключа
+
         new_key = rw_repo.get_key_by_id(key_id)
         text = (
             f"🔑 <b>Ключ #{key_id}</b>\n"
@@ -1784,7 +1784,7 @@ def get_admin_router() -> Router:
         await message.answer(f"✅ Ключ продлён на {days} дн.")
         await message.answer(text, reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(new_key.get('user_id')) if new_key and new_key.get('user_id') else None))
 
-    # --- Управление администраторами: добавить админа ---
+
     class AdminAddAdmin(StatesGroup):
         waiting_for_input = State()
 
@@ -1807,29 +1807,29 @@ def get_admin_router() -> Router:
             return
         raw = (message.text or '').strip()
         target_id: int | None = None
-        # Попытка распарсить как число
+
         if raw.isdigit():
             try:
                 target_id = int(raw)
             except Exception:
                 target_id = None
-        # Если @username
+
         if target_id is None and raw.startswith('@'):
             uname = raw.lstrip('@')
-            # 1) Пробуем как передано (@username)
+
             try:
                 chat = await message.bot.get_chat(raw)
                 target_id = int(chat.id)
             except Exception:
                 target_id = None
-            # 2) Пробуем без @ (username)
+
             if target_id is None:
                 try:
                     chat = await message.bot.get_chat(uname)
                     target_id = int(chat.id)
                 except Exception:
                     target_id = None
-            # 3) Фолбэк: ищем пользователя в локальной БД по username
+
             if target_id is None:
                 try:
                     users = get_all_users() or []
@@ -1844,25 +1844,25 @@ def get_admin_router() -> Router:
         if target_id is None:
             await message.answer("❌ Не удалось распознать ID/username. Отправьте корректное значение или нажмите Отмена.")
             return
-        # Обновляем настройки админов
+
         try:
             from shop_bot.data_manager.remnawave_repository import get_admin_ids, update_setting
             ids = set(get_admin_ids())
             ids.add(int(target_id))
-            # Сохраняем в admin_telegram_ids строкой CSV
+
             ids_str = ",".join(str(i) for i in sorted(ids))
             update_setting("admin_telegram_ids", ids_str)
             await message.answer(f"✅ Пользователь {target_id} добавлен в администраторы.")
         except Exception as e:
             await message.answer(f"❌ Ошибка при сохранении: {e}")
         await state.clear()
-        # Показать админ-меню снова
+
         try:
             await show_admin_menu(message)
         except Exception:
             pass
 
-    # --- Снятие прав администратора ---
+
     class AdminRemoveAdmin(StatesGroup):
         waiting_for_input = State()
 
@@ -1885,29 +1885,29 @@ def get_admin_router() -> Router:
             return
         raw = (message.text or '').strip()
         target_id: int | None = None
-        # Попытка распарсить как число
+
         if raw.isdigit():
             try:
                 target_id = int(raw)
             except Exception:
                 target_id = None
-        # Резолвим username (@username или username)
+
         if target_id is None:
             uname = raw.lstrip('@')
-            # 1) Пробуем как введено
+
             try:
                 chat = await message.bot.get_chat(raw)
                 target_id = int(chat.id)
             except Exception:
                 target_id = None
-            # 2) Пробуем без @
+
             if target_id is None and uname:
                 try:
                     chat = await message.bot.get_chat(uname)
                     target_id = int(chat.id)
                 except Exception:
                     target_id = None
-            # 3) Фолбэк: поиск в БД
+
             if target_id is None and uname:
                 try:
                     users = get_all_users() or []
@@ -1922,7 +1922,7 @@ def get_admin_router() -> Router:
         if target_id is None:
             await message.answer("❌ Не удалось распознать ID/username. Отправьте корректное значение или нажмите Отмена.")
             return
-        # Обновляем настройки админов
+
         try:
             from shop_bot.data_manager.remnawave_repository import get_admin_ids, update_setting
             ids = set(get_admin_ids())
@@ -1944,13 +1944,13 @@ def get_admin_router() -> Router:
         except Exception as e:
             await message.answer(f"❌ Ошибка при сохранении: {e}")
         await state.clear()
-        # Показать админ-меню снова
+
         try:
             await show_admin_menu(message)
         except Exception:
             pass
 
-    # --- Удаление ключа: отмена ---
+
     @admin_router.callback_query(F.data.startswith("admin_key_delete_cancel_"))
     async def admin_key_delete_cancel(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -1986,7 +1986,7 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
             )
 
-    # --- Удаление ключа: подтверждение и выполнение ---
+
     @admin_router.callback_query(F.data.startswith("admin_key_delete_confirm_"))
     async def admin_key_delete_confirm(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -2032,7 +2032,7 @@ def get_admin_router() -> Router:
             logger.error(f"Failed to delete key in DB for email '{email}': {e}")
         if ok_db:
             await callback.message.answer("✅ Ключ удалён" + (" (с хоста тоже)" if ok_host else " (но удалить на хосте не удалось)"))
-            # Обновить список ключей пользователя
+
             keys = get_keys_for_user(user_id)
             try:
                 await callback.message.edit_text(
@@ -2045,7 +2045,7 @@ def get_admin_router() -> Router:
                     f"🔑 Ключи пользователя {user_id}:",
                     reply_markup=keyboards.create_admin_user_keys_keyboard(user_id, keys)
                 )
-            # Уведомление пользователю (если получится)
+
             try:
                 await callback.bot.send_message(
                     user_id,
@@ -2095,9 +2095,9 @@ def get_admin_router() -> Router:
             await message.answer("❌ Не удалось обновить email (возможно, уже занят)")
         await state.clear()
 
-    # --- Начисление реф. баланса: удалено ---
 
-    # --- Выдача подарочного ключа ---
+
+
     class AdminGiftKey(StatesGroup):
         picking_user = State()
         picking_host = State()
@@ -2117,7 +2117,7 @@ def get_admin_router() -> Router:
             reply_markup=keyboards.create_admin_users_pick_keyboard(users, page=0, action="gift")
         )
 
-    # Запуск выдачи подарка сразу для выбранного пользователя из карточки пользователя
+
     @admin_router.callback_query(F.data.startswith("admin_gift_key_"))
     async def admin_gift_key_for_user(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
@@ -2229,7 +2229,7 @@ def get_admin_router() -> Router:
         if days <= 0:
             await message.answer("❌ Срок должен быть положительным")
             return
-        # Сгенерируем уникальный техн. email
+
         user = get_user(user_id) or {}
         username = (user.get('username') or f'user{user_id}').lower()
         username_slug = re.sub(r"[^a-z0-9._-]", "_", username).strip("_")[:16] or f"user{user_id}"
@@ -2249,7 +2249,7 @@ def get_admin_router() -> Router:
                 break
         generated_email = candidate_email
 
-        # Создаём/обновляем клиента на хосте с days_to_add
+
         try:
             host_resp = await create_or_update_key_on_host(host_name, generated_email, days_to_add=days)
         except Exception as e:
@@ -2263,7 +2263,7 @@ def get_admin_router() -> Router:
             return
 
         client_uuid = host_resp["client_uuid"]
-        expiry_ms = int(host_resp["expiry_timestamp_ms"])  # в мс
+        expiry_ms = int(host_resp["expiry_timestamp_ms"])
         connection_link = host_resp.get("connection_string")
 
         key_id = rw_repo.record_key_from_payload(
@@ -2296,9 +2296,9 @@ def get_admin_router() -> Router:
         await state.clear()
         await show_admin_menu(message)
 
-    # Текстовые обработчики больше не используются в новом потоке выдачи ключа
 
-    # --- Начисление основного баланса ---
+
+
     class AdminMainRefill(StatesGroup):
         waiting_for_pair = State()
         waiting_for_amount = State()
@@ -2333,7 +2333,7 @@ def get_admin_router() -> Router:
             reply_markup=keyboards.create_admin_cancel_keyboard()
         )
 
-    # Пагинация списка пользователей для начисления баланса
+
     @admin_router.callback_query(F.data.startswith("admin_add_balance_pick_user_page_"))
     async def admin_add_balance_pick_user_page(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
@@ -2350,7 +2350,7 @@ def get_admin_router() -> Router:
             reply_markup=keyboards.create_admin_users_pick_keyboard(users, page=page, action="add_balance")
         )
 
-    # Выбор пользователя для начисления: дальше админ вводит только сумму
+
     @admin_router.callback_query(F.data.startswith("admin_add_balance_pick_user_"))
     async def admin_add_balance_pick_user(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
@@ -2398,7 +2398,7 @@ def get_admin_router() -> Router:
         await state.clear()
         await show_admin_menu(message)
 
-    # Back from key actions to keys list
+
     @admin_router.callback_query(F.data.startswith("admin_key_back_"))
     async def admin_key_back(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
@@ -2414,7 +2414,7 @@ def get_admin_router() -> Router:
         if not key:
             await callback.message.answer("❌ Ключ не найден")
             return
-        # Если мы находимся в контексте просмотра ключей хоста — вернёмся к списку ключей этого хоста
+
         host_from_state = None
         try:
             data = await state.get_data()
@@ -2437,7 +2437,7 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_user_keys_keyboard(user_id, keys)
             )
 
-    # noop callback to safely ignore placeholder buttons
+
     @admin_router.callback_query(F.data == "noop")
     async def admin_noop(callback: types.CallbackQuery):
         await callback.answer()
@@ -2448,11 +2448,11 @@ def get_admin_router() -> Router:
         await state.clear()
         await show_admin_menu(callback.message, edit_message=True)
 
-    # --- Списание средств администратором (UI) ---
+
     class AdminMainDeduct(StatesGroup):
         waiting_for_amount = State()
 
-    # Вход из админ-меню: показать список пользователей
+
     @admin_router.callback_query(F.data == "admin_deduct_balance")
     async def admin_deduct_balance_entry(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
@@ -2465,7 +2465,7 @@ def get_admin_router() -> Router:
             reply_markup=keyboards.create_admin_users_pick_keyboard(users, page=0, action="deduct_balance")
         )
 
-    # Быстрый путь из карточки пользователя
+
     @admin_router.callback_query(F.data.startswith("admin_deduct_balance_"))
     async def admin_deduct_balance_user(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
@@ -2484,7 +2484,7 @@ def get_admin_router() -> Router:
             reply_markup=keyboards.create_admin_cancel_keyboard()
         )
 
-    # Пагинация списка пользователей
+
     @admin_router.callback_query(F.data.startswith("admin_deduct_balance_pick_user_page_"))
     async def admin_deduct_balance_pick_user_page(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
@@ -2501,7 +2501,7 @@ def get_admin_router() -> Router:
             reply_markup=keyboards.create_admin_users_pick_keyboard(users, page=page, action="deduct_balance")
         )
 
-    # Выбор пользователя -> ввод суммы
+
     @admin_router.callback_query(F.data.startswith("admin_deduct_balance_pick_user_"))
     async def admin_deduct_balance_pick_user(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
@@ -2553,7 +2553,7 @@ def get_admin_router() -> Router:
         await state.clear()
         await show_admin_menu(message)
 
-    # --- Просмотр ключей на хосте ---
+
     class AdminHostKeys(StatesGroup):
         picking_host = State()
 
@@ -2578,7 +2578,7 @@ def get_admin_router() -> Router:
             return
         await callback.answer()
         host_name = callback.data.split("admin_hostkeys_pick_host_")[-1]
-        # Сохраняем контекст текущего хоста, чтобы корректно работать с кнопкой "Назад"
+
         try:
             await state.update_data(hostkeys_host=host_name)
         except Exception:
@@ -2602,7 +2602,7 @@ def get_admin_router() -> Router:
         data = await state.get_data()
         host_name = data.get('hostkeys_host')
         if not host_name:
-            # Если контекст хоста потерян — покажем список хостов
+
             hosts = get_all_hosts()
             await callback.message.edit_text(
                 "🌍 Выберите хост для просмотра ключей:",
@@ -2621,7 +2621,7 @@ def get_admin_router() -> Router:
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
-        # Сбрасываем контекст выбранного хоста
+
         try:
             await state.update_data(hostkeys_host=None)
         except Exception:
@@ -2640,7 +2640,7 @@ def get_admin_router() -> Router:
         await callback.answer()
         await show_admin_menu(callback.message, edit_message=True)
 
-    # --- Быстрое удаление ключа по ID/Email ---
+
     class AdminQuickDeleteKey(StatesGroup):
         waiting_for_identifier = State()
 
@@ -2662,12 +2662,12 @@ def get_admin_router() -> Router:
             return
         text = (message.text or '').strip()
         key = None
-        # сначала попробуем как ID
+
         try:
             key_id = int(text)
             key = rw_repo.get_key_by_id(key_id)
         except Exception:
-            # затем как email
+
             key = rw_repo.get_key_by_email(text)
         if not key:
             await message.answer("❌ Ключ не найден. Пришлите корректный key_id или email.")
@@ -2681,7 +2681,7 @@ def get_admin_router() -> Router:
             reply_markup=keyboards.create_admin_delete_key_confirm_keyboard(key_id)
         )
 
-    # --- Продление ключа на N дней ---
+
     class AdminExtendKey(StatesGroup):
         waiting_for_pair = State()
 
@@ -2723,7 +2723,7 @@ def get_admin_router() -> Router:
         if not host or not email:
             await message.answer("❌ У ключа отсутствуют данные о хосте или email")
             return
-        # Обновим на хосте
+
         resp = None
         try:
             resp = await create_or_update_key_on_host(host, email, days_to_add=days)
@@ -2732,7 +2732,7 @@ def get_admin_router() -> Router:
         if not resp or not resp.get('client_uuid') or not resp.get('expiry_timestamp_ms'):
             await message.answer("❌ Не удалось продлить ключ на сервере")
             return
-        # Обновим в БД
+
         if not rw_repo.update_key(
             key_id,
             remnawave_user_uuid=resp['client_uuid'],
@@ -2742,7 +2742,7 @@ def get_admin_router() -> Router:
             return
         await state.clear()
         await message.answer(f"✅ Ключ #{key_id} продлён на {days} дн.")
-        # Попробуем уведомить пользователя
+
         try:
             await message.bot.send_message(int(key.get('user_id')), f"ℹ️ Администратор продлил ваш ключ #{key_id} на {days} дн.")
         except Exception:
@@ -2764,7 +2764,7 @@ def get_admin_router() -> Router:
 
     @admin_router.message(Broadcast.waiting_for_message)
     async def broadcast_message_received_handler(message: types.Message, state: FSMContext):
-        # сохраняем оригинальное сообщение целиком, чтобы потом скопировать
+
         await state.update_data(message_to_send=message.model_dump_json())
         await message.answer(
             "Сообщение получено. Хотите добавить к нему кнопку со ссылкой?",
@@ -2793,7 +2793,7 @@ def get_admin_router() -> Router:
     @admin_router.message(Broadcast.waiting_for_button_url)
     async def button_url_received_handler(message: types.Message, state: FSMContext, bot: Bot):
         url_to_check = message.text
-        # Простая проверка схемы. Дальнейшую валидацию можно расширить при необходимости.
+
         if not (url_to_check.startswith("http://") or url_to_check.startswith("https://")):
             await message.answer(
                 "❌ Ссылка должна начинаться с http:// или https://. Попробуйте еще раз.")
@@ -2893,7 +2893,7 @@ def get_admin_router() -> Router:
         await state.clear()
         await show_admin_menu(callback.message, edit_message=True)
 
-    # --- Админ-команды для управления заявками на вывод ---
+
     @admin_router.message(Command(commands=["approve_withdraw"]))
     async def approve_withdraw_handler(message: types.Message):
         if not is_admin(message.from_user.id):
@@ -2929,7 +2929,7 @@ def get_admin_router() -> Router:
         except Exception as e:
             await message.answer(f"Ошибка: {e}")
 
-    # ===================== Мониторинг ресурсов =====================
+
     @admin_router.callback_query(F.data == "admin_monitor")
     async def admin_monitor_menu(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -2972,26 +2972,26 @@ def get_admin_router() -> Router:
         
         await callback.answer("🔄 Получение данных...")
         
-        # Пытаемся получить данные первого хоста, как в веб-панели
+
         try:
             hosts = get_all_hosts() or []
             if hosts and len(hosts) > 0:
-                # Используем данные первого хоста
+
                 current_host = hosts[0]
                 data = resource_monitor.get_remote_metrics_for_host(current_host.get('host_name'))
                 is_remote = True
             else:
-                # Если нет хостов, используем локальные данные
+
                 data = resource_monitor.get_local_metrics()
                 is_remote = False
         except Exception:
-            # Фолбэк на локальные данные
+
             data = resource_monitor.get_local_metrics()
             is_remote = False
         
         try:
             if is_remote:
-                # Данные удаленного сервера
+
                 cpu_p = data.get('cpu_percent')
                 mem_p = data.get('memory_percent')
                 disk_p = data.get('disk_percent')
@@ -3001,7 +3001,7 @@ def get_admin_router() -> Router:
                 scope = 'host'
                 name = current_host.get('host_name')
             else:
-                # Локальные данные
+
                 cpu_p = (data.get('cpu') or {}).get('percent')
                 mem_p = (data.get('memory') or {}).get('percent')
                 disks = data.get('disks') or []
@@ -3032,7 +3032,7 @@ def get_admin_router() -> Router:
             ]
         else:
             if is_remote:
-                # Данные удаленного сервера
+
                 cpu = {'percent': data.get('cpu_percent', 0), 'count_logical': data.get('cpu_count', '—')}
                 mem = {
                     'percent': data.get('memory_percent', 0),
@@ -3045,21 +3045,21 @@ def get_admin_router() -> Router:
                     'packets_sent': data.get('network_packets_sent', 0),
                     'packets_recv': data.get('network_packets_recv', 0)
                 }
-                sw = {}  # Swap не доступен для удаленных серверов
-                disks = []  # Диски не доступны для удаленных серверов
+                sw = {}
+                disks = []
                 hostname = data.get('uname', '—')
                 platform = '—'
             else:
-                # Локальные данные
+
                 cpu = data.get('cpu') or {}
                 mem = data.get('memory') or {}
                 sw = data.get('swap') or {}
                 net = data.get('net') or {}
-                disks = data.get('disks', [])  # Получаем информацию о дисках
+                disks = data.get('disks', [])
                 hostname = data.get('hostname', '—')
                 platform = data.get('platform', '—')
             
-            # Определяем статус системы
+
             cpu_percent = cpu.get('percent', 0) or 0
             mem_percent = mem.get('percent', 0) or 0
             disk_percent = disk_p or 0
@@ -3113,11 +3113,11 @@ def get_admin_router() -> Router:
                 f"⬇️ Получено: <code>{format_bytes(net.get('bytes_recv', 0))}</code>",
             ]
             
-            # Добавляем информацию о дисках
+
             if disks:
                 txt.append("")
                 txt.append("💾 <b>Диски:</b>")
-                for disk in disks[:3]:  # Показываем только первые 3 диска
+                for disk in disks[:3]:
                     mountpoint = disk.get('mountpoint') or disk.get('device', '—')
                     percent = disk.get('percent', 0) or 0
                     used = format_bytes(disk.get('used'))
@@ -3126,7 +3126,7 @@ def get_admin_router() -> Router:
                 if len(disks) > 3:
                     txt.append(f"  ... и еще {len(disks) - 3} дисков")
         
-        # Создаем клавиатуру с дополнительными опциями
+
         kb = InlineKeyboardBuilder()
         kb.button(text="🔄 Обновить", callback_data="admin_monitor_local")
         kb.button(text="📊 Полная статистика", callback_data="admin_monitor_detailed")
@@ -3171,7 +3171,7 @@ def get_admin_router() -> Router:
             loadavg = data.get('loadavg') or []
             cpu_count = data.get('cpu_count', 1)
             
-            # Вычисляем загрузку CPU на основе loadavg
+
             cpu_percent = None
             if loadavg and cpu_count:
                 cpu_percent = min((loadavg[0] / cpu_count) * 100, 100)
@@ -3221,12 +3221,12 @@ def get_admin_router() -> Router:
                 f"{get_status_emoji(disk_percent)} <b>Диск:</b> {disk_percent}%",
             ]
             
-            # Добавляем информацию о дисках
+
             disks = data.get('disks', [])
             if disks:
                 txt.append("")
                 txt.append("💾 <b>Диски:</b>")
-                for disk in disks[:3]:  # Показываем только первые 3 диска
+                for disk in disks[:3]:
                     device = disk.get('device') or disk.get('mountpoint', '—')
                     percent = disk.get('percent', 0) or 0
                     used = disk.get('used', '—')
@@ -3235,7 +3235,7 @@ def get_admin_router() -> Router:
                 if len(disks) > 3:
                     txt.append(f"  ... и еще {len(disks) - 3} дисков")
         
-        # Создаем клавиатуру
+
         kb = InlineKeyboardBuilder()
         kb.button(text="🔄 Обновить", callback_data=callback.data)
         kb.button(text="⬅️ Назад", callback_data="admin_monitor")
@@ -3249,7 +3249,7 @@ def get_admin_router() -> Router:
             await callback.answer("Доступ только для админов", show_alert=True)
             return
         
-        # resolve hash
+
         try:
             digest = callback.data.split(':',1)[1]
         except Exception:
@@ -3301,7 +3301,7 @@ def get_admin_router() -> Router:
             loadavg = data.get('loadavg') or []
             cpu_count = data.get('cpu_count', 1)
             
-            # Вычисляем загрузку CPU на основе loadavg
+
             cpu_percent = None
             if loadavg and cpu_count:
                 cpu_percent = min((loadavg[0] / cpu_count) * 100, 100)
@@ -3351,12 +3351,12 @@ def get_admin_router() -> Router:
                 f"{get_status_emoji(disk_percent)} <b>Диск:</b> {disk_percent}%",
             ]
             
-            # Добавляем информацию о дисках
+
             disks = data.get('disks', [])
             if disks:
                 txt.append("")
                 txt.append("💾 <b>Диски:</b>")
-                for disk in disks[:3]:  # Показываем только первые 3 диска
+                for disk in disks[:3]:
                     device = disk.get('device') or disk.get('mountpoint', '—')
                     percent = disk.get('percent', 0) or 0
                     used = disk.get('used', '—')
@@ -3365,7 +3365,7 @@ def get_admin_router() -> Router:
                 if len(disks) > 3:
                     txt.append(f"  ... и еще {len(disks) - 3} дисков")
         
-        # Создаем клавиатуру
+
         kb = InlineKeyboardBuilder()
         kb.button(text="🔄 Обновить", callback_data=callback.data)
         kb.button(text="⬅️ Назад", callback_data="admin_monitor")
@@ -3450,7 +3450,7 @@ def get_admin_router() -> Router:
                 f"• <b>Потеряно исходящих:</b> {net.get('dropout', 0):,}",
             ]
             
-            # Добавляем информацию о температуре
+
             temps = data.get('temperatures', {})
             if temps:
                 txt.append("")
@@ -3462,7 +3462,7 @@ def get_admin_router() -> Router:
                     status_emoji = "🔴" if current >= critical else "🟡" if current >= high else "🟢"
                     txt.append(f"• {status_emoji} <b>{sensor_name}:</b> {current:.1f}°C (критично: {critical:.1f}°C)")
             
-            # Добавляем топ процессов
+
             top_processes = data.get('top_processes', [])
             if top_processes:
                 txt.append("")
@@ -3475,7 +3475,7 @@ def get_admin_router() -> Router:
                     txt.append(f"  {i}. <code>{name}</code> (PID: {pid})")
                     txt.append(f"     Процессор: {cpu_p:.1f}%, Память: {mem_p:.1f}%")
             
-            # Добавляем информацию о всех дисках
+
             if disks:
                 txt.append("")
                 txt.append("💾 <b>Диски:</b>")
@@ -3496,7 +3496,7 @@ def get_admin_router() -> Router:
                     if i < len(disks):
                         txt.append("")
         
-        # Создаем клавиатуру
+
         kb = InlineKeyboardBuilder()
         kb.button(text="🔄 Обновить", callback_data="admin_monitor_detailed")
         kb.button(text="⬅️ К мониторингу", callback_data="admin_monitor")

@@ -22,8 +22,8 @@ notified_users = {}
 
 logger = logging.getLogger(__name__)
 
-# Запуск измерений скорости 3 раза в сутки (каждые 8 часов)
-# Запускаем ТОЛЬКО для SSH-целей.
+
+
 SPEEDTEST_INTERVAL_SECONDS = 8 * 3600
 _last_speedtests_run_at: datetime | None = None
 _last_backup_run_at: datetime | None = None
@@ -299,15 +299,15 @@ async def periodic_subscription_check(bot_controller: BotController):
         try:
             await sync_keys_with_panels()
 
-            # Периодические измерения скорости по всем хостам (оба варианта: SSH и сетевой)
+
             await _maybe_run_periodic_speedtests()
 
-            # Ежедневный автобэкап БД с отправкой админам
+
             bot = bot_controller.get_bot_instance() if bot_controller.get_status().get("is_running") else None
             if bot:
                 await _maybe_run_daily_backup(bot)
 
-            # Периодический сбор метрик и алерты
+
             bot = bot_controller.get_bot_instance() if bot_controller.get_status().get("is_running") else None
             await _maybe_collect_resource_metrics(bot)
 
@@ -349,12 +349,12 @@ async def _run_speedtests_for_all_hosts():
             continue
         try:
             logger.info(f"Scheduler: Speedtest для '{host_name}' запущен...")
-            # Ограничим каждый хост таймаутом, чтобы не зависнуть надолго
+
             try:
                 async with asyncio.timeout(180):
                     res = await speedtest_runner.run_both_for_host(host_name)
             except AttributeError:
-                # Для Python <3.11: fallback через wait_for
+
                 res = await asyncio.wait_for(speedtest_runner.run_both_for_host(host_name), timeout=180)
             ok = res.get('ok')
             err = res.get('error')
@@ -418,7 +418,7 @@ async def _maybe_collect_resource_metrics(bot: Bot | None):
         if _last_resource_collect_at and (now - _last_resource_collect_at).total_seconds() < max(30, interval_sec):
             return
 
-        # Пороговые значения
+
         def _to_int(s: str | None, default: int) -> int:
             try:
                 return int((s or "").strip() or default)
@@ -429,7 +429,7 @@ async def _maybe_collect_resource_metrics(bot: Bot | None):
         disk_thr = _to_int(rw_repo.get_setting("monitoring_disk_threshold"), 90)
         cooldown = _to_int(rw_repo.get_setting("monitoring_alert_cooldown_sec"), 3600)
 
-        # 1) Локально
+
         try:
             local = resource_monitor.get_local_metrics()
             cpu_p = (local.get('cpu') or {}).get('percent')
@@ -449,13 +449,13 @@ async def _maybe_collect_resource_metrics(bot: Bot | None):
         except Exception:
             logger.debug("Scheduler: local metrics collection failed", exc_info=True)
 
-        # 2) Для всех хостов с SSH
+
         hosts = rw_repo.get_all_hosts() or []
         for h in hosts:
             name = h.get('host_name') or ''
             if not name:
                 continue
-            # проверим наличие SSH настроек
+
             if not (h.get('ssh_host') and h.get('ssh_user')):
                 continue
             try:
@@ -527,7 +527,7 @@ async def _maybe_alert(
     if not bot:
         return
     
-    # Определяем критические и предупреждающие пороги
+
     cpu_warning = max(50, cpu_thr - 20)
     mem_warning = max(50, mem_thr - 20)
     disk_warning = max(50, disk_thr - 20)
@@ -535,7 +535,7 @@ async def _maybe_alert(
     breaches: list[dict] = []
     alerts: list[dict] = []
     
-    # Проверяем процессор
+
     if cpu is not None:
         if cpu >= cpu_thr:
             breaches.append({
@@ -554,7 +554,7 @@ async def _maybe_alert(
                 'emoji': '🟡'
             })
     
-    # Проверяем память
+
     if mem is not None:
         if mem >= mem_thr:
             breaches.append({
@@ -573,7 +573,7 @@ async def _maybe_alert(
                 'emoji': '🟡'
             })
     
-    # Проверяем Disk
+
     if disk is not None:
         if disk >= disk_thr:
             breaches.append({
@@ -592,7 +592,7 @@ async def _maybe_alert(
                 'emoji': '🟡'
             })
     
-    # Отправляем критические алерты
+
     if breaches:
         key = (scope, name, "critical", ",".join(sorted([b['type'] for b in breaches])))
         now = datetime.now()
@@ -601,12 +601,12 @@ async def _maybe_alert(
             _last_resource_alert_at[key] = now
             await _send_alert(bot, scope, name, breaches, 'critical')
     
-    # Отправляем предупреждения (реже)
+
     if alerts:
         key = (scope, name, "warning", ",".join(sorted([a['type'] for a in alerts])))
         now = datetime.now()
         last = _last_resource_alert_at.get(key)
-        if not last or (now - last).total_seconds() >= max(300, cooldown_sec * 2):  # Предупреждения реже
+        if not last or (now - last).total_seconds() >= max(300, cooldown_sec * 2):
             _last_resource_alert_at[key] = now
             await _send_alert(bot, scope, name, alerts, 'warning')
 
@@ -620,7 +620,7 @@ async def _send_alert(bot: Bot, scope: str, name: str, issues: list[dict], level
     if not admin_ids:
         return
     
-    # Определяем иконку и заголовок
+
     if level == 'critical':
         header_emoji = "🚨"
         header_text = "КРИТИЧЕСКИЙ АЛЕРТ"
@@ -628,7 +628,7 @@ async def _send_alert(bot: Bot, scope: str, name: str, issues: list[dict], level
         header_emoji = "⚠️"
         header_text = "ПРЕДУПРЕЖДЕНИЕ"
     
-    # Определяем объект
+
     if scope == 'local':
         obj_name = f"🖥️ Панель ({name})"
     elif scope == 'host':
@@ -638,7 +638,7 @@ async def _send_alert(bot: Bot, scope: str, name: str, issues: list[dict], level
     else:
         obj_name = f"❓ {scope}:{name}"
     
-    # Формируем текст
+
     text_lines = [
         f"{header_emoji} <b>{header_text}</b>",
         "",
@@ -655,7 +655,7 @@ async def _send_alert(bot: Bot, scope: str, name: str, issues: list[dict], level
         threshold = issue['threshold']
         text_lines.append(f"  {emoji} <b>{type_name}:</b> {value:.1f}% (порог: {threshold}%)")
     
-    # Добавляем рекомендации
+
     text_lines.extend([
         "",
         "💡 <b>Рекомендации:</b>",
@@ -667,7 +667,7 @@ async def _send_alert(bot: Bot, scope: str, name: str, issues: list[dict], level
     
     text = "\n".join(text_lines)
     
-    # Отправляем всем админам
+
     for admin_id in admin_ids:
         try:
             await bot.send_message(admin_id, text, parse_mode='HTML')

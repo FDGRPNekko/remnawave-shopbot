@@ -53,7 +53,7 @@ class SupportBotController:
 
         token = rw_repo.get_setting("support_bot_token")
         bot_username = rw_repo.get_setting("support_bot_username")
-        # допускаем отсутствие одиночного admin_telegram_id, если настроены admin_telegram_ids
+
         admin_id = rw_repo.get_setting("admin_telegram_id")
         admin_ids = get_admin_ids()
 

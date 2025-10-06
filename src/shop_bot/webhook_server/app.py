@@ -11,8 +11,8 @@ from hmac import compare_digest
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 from math import ceil
-from flask import Flask, request, render_template, redirect, url_for, flash, session, current_app, jsonify, send_file  # type: ignore
-from flask_wtf.csrf import CSRFProtect, generate_csrf  # type: ignore
+from flask import Flask, request, render_template, redirect, url_for, flash, session, current_app, jsonify, send_file
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 import secrets
 import urllib.parse
 import urllib.request
@@ -43,9 +43,9 @@ from shop_bot.data_manager.remnawave_repository import (
     update_host_url, update_host_name, update_host_ssh_settings, get_latest_speedtest, get_speedtests,
     get_all_keys, get_keys_for_user, delete_key_by_id, update_key_comment,
     get_balance, adjust_user_balance, get_referrals_for_user,
-    # users pagination
+
     get_users_paginated, get_keys_counts_for_users,
-    # SSH targets for speedtests
+
     get_all_ssh_targets, get_ssh_target, create_ssh_target, update_ssh_target_fields, delete_ssh_target,
     get_user
 )
@@ -65,30 +65,30 @@ ALL_SETTINGS_KEYS = [
     "yookassa_secret_key", "sbp_enabled", "receipt_email", "cryptobot_token",
     "heleket_merchant_id", "heleket_api_key", "domain", "referral_percentage",
     "referral_discount", "ton_wallet_address", "tonapi_key", "force_subscription", "trial_enabled", "trial_duration_days", "enable_referrals", "minimum_withdrawal",
-    # Реферальные начисления: альтернативный фиксированный бонус
+
     "enable_fixed_referral_bonus", "fixed_referral_bonus_amount",
-    # Тип начисления реферальной системы (без стартового бонуса)
+
     "referral_reward_type", "referral_on_start_referrer_amount",
     "support_forum_chat_id",
     "support_bot_token", "support_bot_username",
-    # UI
+
     "panel_brand_title",
-    # Контент бота: тексты главного меню и инструкций
+
     "main_menu_text", "howto_intro_text",
     "howto_android_text", "howto_ios_text", "howto_windows_text", "howto_linux_text",
-    # Подписи кнопок бота
+
     "btn_trial_text", "btn_profile_text", "btn_my_keys_text", "btn_buy_key_text", "btn_topup_text",
     "btn_referral_text", "btn_support_text", "btn_about_text", "btn_speed_text", "btn_howto_text",
     "btn_admin_text", "btn_back_to_menu_text",
-    # Backups
+
     "backup_interval_days",
-    # Monitoring
+
     "monitoring_enabled", "monitoring_interval_sec",
     "monitoring_cpu_threshold", "monitoring_mem_threshold", "monitoring_disk_threshold",
     "monitoring_alert_cooldown_sec",
-    # YooMoney (P2P) and Telegram Stars
+
     "yoomoney_enabled", "yoomoney_wallet", "yoomoney_secret", "stars_per_rub", "stars_enabled",
-    # YooMoney OAuth optional keys + stored access token
+
     "yoomoney_api_token", "yoomoney_client_id", "yoomoney_client_secret", "yoomoney_redirect_uri",
 ]
 
@@ -117,15 +117,15 @@ def create_webhook_app(bot_controller_instance):
         static_folder='static'
     )
     
-    # SECRET_KEY из окружения или сгенерированный на лету (без хардкода)
+
     flask_app.config['SECRET_KEY'] = os.getenv('SHOPBOT_SECRET_KEY') or secrets.token_hex(32)
     flask_app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
-    # CSRF защита для всех POST форм в панели; вебхуки будут исключены
+
     csrf = CSRFProtect()
     csrf.init_app(flask_app)
 
-    # Вспомогательная функция: обработка промокода после успешной оплаты
+
     def _handle_promo_after_payment(metadata: dict) -> None:
         try:
             promo_code = (metadata.get('promo_code') or '').strip()
@@ -187,7 +187,7 @@ def create_webhook_app(bot_controller_instance):
                 logger.warning(f"Promo: deactivate failed for code {promo_code}: {e}")
                 deact_ok = False
 
-        # Уведомление админам
+
         try:
             bot = _bot_controller.get_bot_instance()
             loop = current_app.config.get('EVENT_LOOP')
@@ -218,7 +218,7 @@ def create_webhook_app(bot_controller_instance):
 
     @flask_app.context_processor
     def inject_current_year():
-        # Добавляем csrf_token в шаблоны для meta и скрытых полей
+
         return {
             'current_year': datetime.utcnow().year,
             'csrf_token': generate_csrf
@@ -239,7 +239,7 @@ def create_webhook_app(bot_controller_instance):
             if request.form.get('username') == settings.get("panel_login") and \
                request.form.get('password') == settings.get("panel_password"):
                 session['logged_in'] = True
-                # remember-me: делаем сессию постоянной при установленном чекбоксе
+
                 session.permanent = bool(request.form.get('remember_me'))
                 return redirect(url_for('dashboard_page'))
             else:
@@ -350,7 +350,7 @@ def create_webhook_app(bot_controller_instance):
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
-    # Partials for dashboard fragments (auto-update without reload)
+
     @flask_app.route('/dashboard/stats.partial')
     @login_required
     def dashboard_stats_partial():
@@ -377,7 +377,7 @@ def create_webhook_app(bot_controller_instance):
         data = get_daily_stats_for_charts(days=30)
         return jsonify(data)
 
-    # --- Resource Monitor ---
+
     @flask_app.route('/monitor')
     @login_required
     def monitor_page():
@@ -434,7 +434,7 @@ def create_webhook_app(bot_controller_instance):
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
-    # --- Support partials ---
+
     @flask_app.route('/support/table.partial')
     @login_required
     def support_table_partial():
@@ -451,7 +451,7 @@ def create_webhook_app(bot_controller_instance):
             count = get_open_tickets_count() or 0
         except Exception:
             count = 0
-        # Возвращаем готовый HTML-бейдж (или пустую строку)
+
         if count and count > 0:
             html = (
                 '<span class="badge bg-green-lt" title="Открытые тикеты">'
@@ -465,16 +465,16 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/users')
     @login_required
     def users_page():
-        # Параметры пагинации и поиска
+
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 25, type=int)
         q = (request.args.get('q') or '').strip()
 
-        # Пагинированный список пользователей
+
         users, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
         user_ids = [u['telegram_id'] for u in users]
 
-        # Количество ключей на пользователя (одним запросом)
+
         try:
             keys_counts = get_keys_counts_for_users(user_ids)
         except Exception:
@@ -482,14 +482,14 @@ def create_webhook_app(bot_controller_instance):
 
         for user in users:
             uid = user['telegram_id']
-            # Лёгкие поля для списка
+
             try:
-                # баланс уже есть в users-строке (колонка users.balance)
+
                 user['balance'] = float(user.get('balance') or 0.0)
             except Exception:
                 user['balance'] = 0.0
             user['keys_count'] = int(keys_counts.get(uid, 0) or 0)
-            # Не грузим user_keys и referrals здесь — это будет по требованию
+
 
         from math import ceil
         total_pages = ceil(total / per_page) if per_page else 1
@@ -497,7 +497,7 @@ def create_webhook_app(bot_controller_instance):
         common_data = get_common_template_data()
         return render_template('users.html', users=users, current_page=page, total_pages=total_pages, q=q, per_page=per_page, **common_data)
 
-    # Partial: users table tbody (с пагинацией и поиском)
+
     @flask_app.route('/users/table.partial')
     @login_required
     def users_table_partial():
@@ -519,7 +519,7 @@ def create_webhook_app(bot_controller_instance):
             user['keys_count'] = int(keys_counts.get(uid, 0) or 0)
         return render_template('partials/users_table.html', users=users)
 
-    # Partial: отдельная таблица ключей пользователя (ленивая подгрузка)
+
     @flask_app.route('/users/<int:user_id>/keys.partial')
     @login_required
     def user_keys_partial(user_id: int):
@@ -529,7 +529,7 @@ def create_webhook_app(bot_controller_instance):
             keys = []
         return render_template('partials/user_keys_table.html', keys=keys)
 
-    # JSON: рефералы пользователя (ленивая подгрузка в модалке баланса)
+
     @flask_app.route('/users/<int:user_id>/referrals.json')
     @login_required
     def user_referrals_json(user_id: int):
@@ -539,7 +539,7 @@ def create_webhook_app(bot_controller_instance):
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
-    # Partial: пагинация (рендерим ul.pagination) — удобно обновлять вместе с таблицей
+
     @flask_app.route('/users/pagination.partial')
     @login_required
     def users_pagination_partial():
@@ -557,7 +557,7 @@ def create_webhook_app(bot_controller_instance):
         try:
             delta = float(request.form.get('delta', '0') or '0')
         except ValueError:
-            # AJAX?
+
             wants_json = 'application/json' in (request.headers.get('Accept') or '') or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
             if wants_json:
                 return jsonify({"ok": False, "error": "invalid_amount"}), 400
@@ -571,7 +571,7 @@ def create_webhook_app(bot_controller_instance):
         if wants_json:
             return jsonify({"ok": ok, "message": message})
         flash(message, category)
-        # Telegram-уведомление пользователю (через запущенный цикл событий бота)
+
         try:
             if ok:
                 bot = _bot_controller.get_bot_instance()
@@ -583,7 +583,7 @@ def create_webhook_app(bot_controller_instance):
                         asyncio.run_coroutine_threadsafe(bot.send_message(chat_id=user_id, text=text), loop)
                         logger.info(f"Запланирована отправка уведомления о балансе пользователю {user_id}")
                     else:
-                        # fallback, если по какой-то причине нет общего цикла (не рекомендуется, но лучше чем молча не отправить)
+
                         logger.warning("Цикл событий (EVENT_LOOP) не запущен; использую резервный asyncio.run для уведомления о балансе")
                         asyncio.run(bot.send_message(chat_id=user_id, text=text))
                 else:
@@ -613,7 +613,7 @@ def create_webhook_app(bot_controller_instance):
         common_data = get_common_template_data()
         return render_template('admin_keys.html', keys=keys, hosts=hosts, users=users, **common_data)
 
-    # Partial: admin keys table tbody
+
     @flask_app.route('/admin/keys/table.partial')
     @login_required
     def admin_keys_table_partial():
@@ -650,15 +650,15 @@ def create_webhook_app(bot_controller_instance):
             Remnawave_uuid = (request.form.get('Remnawave_client_uuid') or '').strip()
             key_email = (request.form.get('key_email') or '').strip()
             expiry = request.form.get('expiry_date') or ''
-            # ожидаем datetime-local, конвертируем в ms
+
             expiry_ms = int(datetime.fromisoformat(expiry).timestamp() * 1000) if expiry else 0
         except Exception:
             flash('Проверьте поля ключа.', 'danger')
             return redirect(request.referrer or url_for('admin_keys_page'))
-        # Если UUID не указан — генерируем автоматически, как при выдаче ключа в боте
+
         if not Remnawave_uuid:
             Remnawave_uuid = str(uuid.uuid4())
-        # 1) Создать/обновить клиента на Remnawave-хосте
+
         result = None
         try:
             result = asyncio.run(remnawave_api.create_or_update_key_on_host(host_name, key_email, expiry_timestamp_ms=expiry_ms or None))
@@ -669,14 +669,14 @@ def create_webhook_app(bot_controller_instance):
             flash('Не удалось создать ключ на хосте. Проверьте доступность Remnawave.', 'danger')
             return redirect(request.referrer or url_for('admin_keys_page'))
 
-        # Обновляем UUID и expiry на основании ответа панели
+
         try:
             Remnawave_uuid = result.get('client_uuid') or Remnawave_uuid
             expiry_ms = result.get('expiry_timestamp_ms') or expiry_ms
         except Exception:
             pass
 
-        # 2) Сохранить в БД
+
         new_id = rw_repo.record_key_from_payload(
             user_id=user_id,
             payload=result,
@@ -684,7 +684,7 @@ def create_webhook_app(bot_controller_instance):
         )
         flash(('Ключ добавлен.' if new_id else 'Ошибка при добавлении ключа.'), 'success' if new_id else 'danger')
 
-        # 3) Уведомление пользователю в Telegram (без email, с пометкой, что ключ выдан администратором)
+
         try:
             bot = _bot_controller.get_bot_instance()
             if bot and new_id:
@@ -781,7 +781,7 @@ def create_webhook_app(bot_controller_instance):
             if not key_id:
                 return jsonify({"ok": False, "error": "db_failed"}), 500
 
-            # уведомление в телеграме оставляем как прежде
+
             try:
                 bot = _bot_controller.get_bot_instance()
                 if bot and key_id:
@@ -813,8 +813,8 @@ def create_webhook_app(bot_controller_instance):
             })
 
         if mode == 'gift':
-            # Подарочный КЛЮЧ: создаём пользователя на Remnawave и сохраняем ключ в БД без привязки к телеграм-пользователю
-            # 1) Определяем срок действия
+
+
             expiry_ms: int | None = None
             if expiry_str:
                 try:
@@ -825,7 +825,7 @@ def create_webhook_app(bot_controller_instance):
             if expiry_ms is None and days_total > 0:
                 expiry_ms = int((datetime.utcnow() + timedelta(days=days_total)).replace(tzinfo=timezone.utc).timestamp() * 1000)
 
-            # 2) Сгенерируем уникальный email для подарочного ключа
+
             base_local = f"gift-{uuid.uuid4().hex[:8]}"
             domain = "bot.local"
             attempt = 0
@@ -835,7 +835,7 @@ def create_webhook_app(bot_controller_instance):
                     break
                 attempt += 1
 
-            # 3) Создадим/обновим ключ на Remnawave
+
             try:
                 result = asyncio.run(remnawave_api.create_or_update_key_on_host(
                     host_name,
@@ -850,7 +850,7 @@ def create_webhook_app(bot_controller_instance):
             if not result:
                 return jsonify({"ok": False, "error": "host_failed"}), 500
 
-            # 4) Сохраним ключ в БД без привязки к пользователю (user_id=0)
+
             key_id = rw_repo.record_key_from_payload(
                 user_id=0,
                 payload=result,
@@ -860,7 +860,7 @@ def create_webhook_app(bot_controller_instance):
             if not key_id:
                 return jsonify({"ok": False, "error": "db_failed"}), 500
 
-            # 5) Ответ с данными ключа для копирования
+
             return jsonify({
                 "ok": True,
                 "key_id": key_id,
@@ -901,7 +901,7 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/admin/keys/<int:key_id>/delete', methods=['POST'])
     @login_required
     def delete_key_route(key_id: int):
-        # пытаемся удалить с сервера и из БД
+
         try:
             key = rw_repo.get_key_by_id(key_id)
             if key:
@@ -926,13 +926,13 @@ def create_webhook_app(bot_controller_instance):
         if not key:
             return jsonify({"ok": False, "error": "not_found"}), 404
         try:
-            # Текущая дата истечения
+
             cur_expiry = key.get('expiry_date')
             if isinstance(cur_expiry, str):
                 try:
                     exp_dt = datetime.fromisoformat(cur_expiry)
                 except Exception:
-                    # fallback: если в БД дата как 'YYYY-MM-DD HH:MM:SS'
+
                     try:
                         exp_dt = datetime.strptime(cur_expiry, '%Y-%m-%d %H:%M:%S')
                     except Exception:
@@ -942,7 +942,7 @@ def create_webhook_app(bot_controller_instance):
             new_dt = exp_dt + timedelta(days=delta_days)
             new_ms = int(new_dt.timestamp() * 1000)
 
-            # 1) Применяем новый срок на Remnawave (чтобы дата в панели совпадала с реальной)
+
             try:
                 result = asyncio.run(remnawave_api.create_or_update_key_on_host(
                     host_name=key.get('host_name'),
@@ -954,7 +954,7 @@ def create_webhook_app(bot_controller_instance):
             if not result or not result.get('expiry_timestamp_ms'):
                 return jsonify({"ok": False, "error": "remnawave_update_failed"}), 500
 
-            # 2) Сохраняем в БД (обновляем UUID, если изменился, и дату истечения)
+
             client_uuid = result.get('client_uuid') or key.get('remnawave_user_uuid') or ''
             if not rw_repo.update_key(
                 key_id,
@@ -964,7 +964,7 @@ def create_webhook_app(bot_controller_instance):
             ):
                 return jsonify({"ok": False, "error": "db_update_failed"}), 500
 
-            # Уведомим пользователя о продлении/сокращении срока
+
             try:
                 user_id = key.get('user_id')
                 new_ms_final = int(result.get('expiry_timestamp_ms'))
@@ -1004,13 +1004,13 @@ def create_webhook_app(bot_controller_instance):
                     s = exp.strip()
                     if s:
                         try:
-                            # поддержка ISO-строк с Z/таймзоной и без неё
+
                             exp_dt = datetime.fromisoformat(s)
                         except Exception:
                             try:
                                 exp_dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
                             except Exception:
-                                # fallback: форматы без таймзоны
+
                                 try:
                                     exp_dt = datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
                                 except Exception:
@@ -1019,7 +1019,7 @@ def create_webhook_app(bot_controller_instance):
                     exp_dt = exp
             except Exception:
                 exp_dt = None
-            # Приводим к наивному UTC для корректного сравнения
+
             try:
                 if exp_dt is not None and getattr(exp_dt, 'tzinfo', None) is not None:
                     exp_dt = exp_dt.astimezone(timezone.utc).replace(tzinfo=None)
@@ -1027,10 +1027,10 @@ def create_webhook_app(bot_controller_instance):
                 pass
             if not exp_dt or exp_dt > now:
                 continue
-            # Истёкший — пробуем удалить на сервере и в БД, уведомляем пользователя
+
             try:
                 try:
-                    # Определяем хост: предпочтительно из записи ключа, иначе по squad_uuid
+
                     host_for_delete = (k.get('host_name') or '').strip()
                     if not host_for_delete:
                         try:
@@ -1047,7 +1047,7 @@ def create_webhook_app(bot_controller_instance):
                     pass
                 delete_key_by_id(k.get('key_id'))
                 removed += 1
-                # Уведомление пользователю о автоудалении
+
                 try:
                     bot = _bot_controller.get_bot_instance()
                     loop = current_app.config.get('EVENT_LOOP')
@@ -1075,7 +1075,7 @@ def create_webhook_app(bot_controller_instance):
         flash('Комментарий обновлён.' if ok else 'Не удалось обновить комментарий.', 'success' if ok else 'danger')
         return redirect(request.referrer or url_for('admin_keys_page'))
 
-    # --- Host SSH settings update ---
+
     @flask_app.route('/admin/hosts/ssh/update', methods=['POST'])
     @login_required
     def update_host_ssh_route():
@@ -1083,7 +1083,7 @@ def create_webhook_app(bot_controller_instance):
         ssh_host = (request.form.get('ssh_host') or '').strip() or None
         ssh_port_raw = (request.form.get('ssh_port') or '').strip()
         ssh_user = (request.form.get('ssh_user') or '').strip() or None
-        ssh_password = request.form.get('ssh_password')  # allow empty to clear
+        ssh_password = request.form.get('ssh_password')
         ssh_key_path = (request.form.get('ssh_key_path') or '').strip() or None
         ssh_port = None
         try:
@@ -1095,7 +1095,7 @@ def create_webhook_app(bot_controller_instance):
         flash('SSH-параметры обновлены.' if ok else 'Не удалось обновить SSH-параметры.', 'success' if ok else 'danger')
         return redirect(request.referrer or url_for('settings_page'))
 
-    # --- SSH Target speedtest: run single ---
+
     @flask_app.route('/admin/ssh-targets/<target_name>/speedtest/run', methods=['POST'])
     @login_required
     def run_ssh_target_speedtest_route(target_name: str):
@@ -1114,7 +1114,7 @@ def create_webhook_app(bot_controller_instance):
         flash(('Тест выполнен.' if res and res.get('ok') else f"Ошибка теста: {res.get('error') if res else 'unknown'}"), 'success' if res and res.get('ok') else 'danger')
         return redirect(request.referrer or url_for('settings_page', tab='hosts'))
 
-    # --- SSH Target speedtest: run all ---
+
     @flask_app.route('/admin/ssh-targets/speedtests/run-all', methods=['POST'])
     @login_required
     def run_all_ssh_target_speedtests_route():
@@ -1149,7 +1149,7 @@ def create_webhook_app(bot_controller_instance):
             flash(f"SSH цели: тесты скорости выполнены для всех ({ok_count}/{total})", 'success')
         return redirect(request.referrer or url_for('dashboard_page'))
 
-    # --- Host speedtest run & fetch ---
+
     @flask_app.route('/admin/hosts/<host_name>/speedtest/run', methods=['POST'])
     @login_required
     def run_host_speedtest_route(host_name: str):
@@ -1161,7 +1161,7 @@ def create_webhook_app(bot_controller_instance):
             elif method == 'net':
                 res = asyncio.run(speedtest_runner.run_and_store_net_probe(host_name))
             else:
-                # both
+
                 res = asyncio.run(speedtest_runner.run_both_for_host(host_name))
         except Exception as e:
             res = {'ok': False, 'error': str(e)}
@@ -1194,7 +1194,7 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/admin/speedtests/run-all', methods=['POST'])
     @login_required
     def run_all_speedtests_route():
-        # Запустить тесты для всех хостов (оба варианта)
+
         logger.info("Панель: запуск спидтеста ДЛЯ ВСЕХ хостов")
         try:
             hosts = get_all_hosts()
@@ -1225,11 +1225,11 @@ def create_webhook_app(bot_controller_instance):
             flash(f"Тесты скорости выполнены для всех хостов: {ok_count}/{len(hosts)}", 'success')
         return redirect(request.referrer or url_for('dashboard_page'))
 
-    # --- Host speedtest auto-install ---
+
     @flask_app.route('/admin/hosts/<host_name>/speedtest/install', methods=['POST'])
     @login_required
     def auto_install_speedtest_route(host_name: str):
-        # Supports both HTML form and AJAX
+
         try:
             res = asyncio.run(speedtest_runner.auto_install_speedtest_on_host(host_name))
         except Exception as e:
@@ -1238,7 +1238,7 @@ def create_webhook_app(bot_controller_instance):
         if wants_json:
             return jsonify({"ok": bool(res.get('ok')), "log": res.get('log')})
         flash(('Установка завершена успешно.' if res.get('ok') else 'Не удалось установить speedtest на хост.') , 'success' if res.get('ok') else 'danger')
-        # Сохраним логи в flash (урезанно)
+
         try:
             log = res.get('log') or ''
             short = '\n'.join((log.splitlines() or [])[-20:])
@@ -1375,7 +1375,7 @@ def create_webhook_app(bot_controller_instance):
                             )
                     except Exception as e:
                         logger.warning(f"Открытие тикета: не удалось переоткрыть тему форума для тикета {ticket_id}: {e}")
-                    # Notify user
+
                     try:
                         bot = _support_bot_controller.get_bot_instance()
                         loop = current_app.config.get('EVENT_LOOP')
@@ -1459,18 +1459,18 @@ def create_webhook_app(bot_controller_instance):
     @login_required
     def settings_page():
         if request.method == 'POST':
-            # Смена пароля панели (если поле не пустое)
+
             if 'panel_password' in request.form and request.form.get('panel_password'):
                 update_setting('panel_password', request.form.get('panel_password'))
 
-            # Обработка чекбоксов, где в форме идёт hidden=false + checkbox=true
+
             checkbox_keys = ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled', 'monitoring_enabled']
             for checkbox_key in checkbox_keys:
                 values = request.form.getlist(checkbox_key)
                 value = values[-1] if values else 'false'
                 update_setting(checkbox_key, value)
 
-            # Обновление остальных настроек из ALL_SETTINGS_KEYS (кроме panel_password и чекбоксов)
+
             for key in ALL_SETTINGS_KEYS:
                 if key in checkbox_keys or key == 'panel_password':
                     continue
@@ -1486,18 +1486,18 @@ def create_webhook_app(bot_controller_instance):
         hosts = get_all_hosts()
         for host in hosts:
             host['plans'] = get_plans_for_host(host['host_name'])
-            # добавить последний результат спидтеста в карточку
+
             try:
                 host['latest_speedtest'] = get_latest_speedtest(host['host_name'])
             except Exception:
                 host['latest_speedtest'] = None
-        # SSH-цели для спидтестов (отдельно от хостов)
+
         try:
             ssh_targets = get_all_ssh_targets()
         except Exception:
             ssh_targets = []
         
-        # Список доступных бэкапов на сервере (zip)
+
         backups = []
         try:
             from pathlib import Path
@@ -1518,7 +1518,7 @@ def create_webhook_app(bot_controller_instance):
         common_data = get_common_template_data()
         return render_template('settings.html', settings=current_settings, hosts=hosts, ssh_targets=ssh_targets, backups=backups, **common_data)
 
-    # --- SSH Targets (Speedtest) Management ---
+
     @flask_app.route('/admin/ssh-targets/create', methods=['POST'])
     @login_required
     def create_ssh_target_route():
@@ -1526,7 +1526,7 @@ def create_webhook_app(bot_controller_instance):
         ssh_host = (request.form.get('ssh_host') or '').strip()
         ssh_port = request.form.get('ssh_port')
         ssh_user = (request.form.get('ssh_user') or '').strip() or None
-        ssh_password = request.form.get('ssh_password')  # allow empty to clear
+        ssh_password = request.form.get('ssh_password')
         ssh_key_path = (request.form.get('ssh_key_path') or '').strip() or None
         description = (request.form.get('description') or '').strip() or None
         try:
@@ -1602,7 +1602,7 @@ def create_webhook_app(bot_controller_instance):
             pass
         return redirect(request.referrer or url_for('settings_page', tab='hosts'))
 
-    # --- DB Backup/Restore ---
+
     @flask_app.route('/admin/db/backup', methods=['POST'])
     @login_required
     def backup_db_route():
@@ -1611,7 +1611,7 @@ def create_webhook_app(bot_controller_instance):
             if not zip_path or not os.path.isfile(zip_path):
                 flash('Не удалось создать бэкап БД.', 'danger')
                 return redirect(request.referrer or url_for('settings_page', tab='panel'))
-            # Отдаём файл на скачивание
+
             return send_file(str(zip_path), as_attachment=True, download_name=os.path.basename(zip_path))
         except Exception as e:
             logger.error(f"DB backup error: {e}")
@@ -1622,11 +1622,11 @@ def create_webhook_app(bot_controller_instance):
     @login_required
     def restore_db_route():
         try:
-            # Вариант 1: восстановление из имеющегося архива
+
             existing = (request.form.get('existing_backup') or '').strip()
             ok = False
             if existing:
-                # Разрешаем только файлы внутри BACKUPS_DIR
+
                 base = backup_manager.BACKUPS_DIR
                 candidate = (base / existing).resolve()
                 if str(candidate).startswith(str(base.resolve())) and os.path.isfile(candidate):
@@ -1635,7 +1635,7 @@ def create_webhook_app(bot_controller_instance):
                     flash('Выбранный бэкап не найден.', 'danger')
                     return redirect(request.referrer or url_for('settings_page', tab='panel'))
             else:
-                # Вариант 2: загрузка собственного файла
+
                 file = request.files.get('db_file')
                 if not file or file.filename == '':
                     flash('Файл для восстановления не выбран.', 'warning')
@@ -1811,12 +1811,12 @@ def create_webhook_app(bot_controller_instance):
     def ban_user_route(user_id):
         ban_user(user_id)
         flash(f'Пользователь {user_id} был заблокирован.', 'success')
-        # Telegram-уведомление пользователю о бане с кнопкой поддержки (без кнопки "Назад в меню")
+
         try:
             bot = _bot_controller.get_bot_instance()
             if bot:
                 text = "🚫 Ваш аккаунт заблокирован администратором. Если это ошибка — напишите в поддержку."
-                # Собираем клавиатуру из одной кнопки поддержки
+
                 try:
                     support = (get_setting("support_bot_username") or get_setting("support_user") or "").strip()
                 except Exception:
@@ -1824,7 +1824,7 @@ def create_webhook_app(bot_controller_instance):
                 kb = InlineKeyboardBuilder()
                 url: str | None = None
                 if support:
-                    if support.startswith("@"):  # @username
+                    if support.startswith("@"):
                         url = f"tg://resolve?domain={support[1:]}"
                     elif support.startswith("tg://"):
                         url = support
@@ -1858,7 +1858,7 @@ def create_webhook_app(bot_controller_instance):
     def unban_user_route(user_id):
         unban_user(user_id)
         flash(f'Пользователь {user_id} был разблокирован.', 'success')
-        # Telegram-уведомление пользователю о разбане с кнопкой перехода в главное меню
+
         try:
             bot = _bot_controller.get_bot_instance()
             if bot:
@@ -1889,10 +1889,10 @@ def create_webhook_app(bot_controller_instance):
             if result:
                 success_count += 1
 
-        # удаляем из БД все ключи пользователя
+
         delete_user_keys(user_id)
 
-        # уведомление пользователю в Telegram
+
         try:
             bot = _bot_controller.get_bot_instance()
             if bot:
@@ -1915,7 +1915,7 @@ def create_webhook_app(bot_controller_instance):
         )
         category = 'success' if success_count == total else 'warning'
 
-        # Если это AJAX-запрос (из таблицы пользователей) — возвращаем JSON
+
         wants_json = 'application/json' in (request.headers.get('Accept') or '') or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         if wants_json:
             return jsonify({"ok": success_count == total, "message": message, "revoked": success_count, "total": total}), 200
@@ -1934,7 +1934,7 @@ def create_webhook_app(bot_controller_instance):
             flash('Укажите название хоста, базовый URL и API токен.', 'danger')
             return redirect(url_for('settings_page', tab='hosts'))
 
-        # create_host требует старые поля; заполним минимально (host_url используем как base_url)
+
         try:
             create_host(
                 name=name,
@@ -1949,7 +1949,7 @@ def create_webhook_app(bot_controller_instance):
             flash(f"Не удалось создать хост '{name}'.", 'danger')
             return redirect(url_for('settings_page', tab='hosts'))
 
-        # Сохраняем Remnawave-поля в xui_hosts
+
         try:
             update_host_remnawave_settings(
                 name,
@@ -2082,14 +2082,14 @@ def create_webhook_app(bot_controller_instance):
                 logger.warning(f"❌ Отсутствуют обязательные поля. Доступно: {list(form.keys())}")
                 return 'Bad Request', 400
             
-            # Проверяем тип уведомления - обрабатываем только p2p-incoming
+
             notification_type = form.get('notification_type', '')
             logger.info(f"📝 Тип уведомления: {notification_type}")
             if notification_type != 'p2p-incoming':
                 logger.info(f"⏭️  Игнорируем тип уведомления: {notification_type}")
                 return 'OK', 200
             
-            # Проверяем, что это не тестовый платеж
+
             codepro = form.get('codepro', '')
             if codepro.lower() == 'true':
                 logger.info("🧪 Игнорируем тестовый платеж (codepro=true)")
@@ -2113,7 +2113,7 @@ def create_webhook_app(bot_controller_instance):
                 logger.warning("🔐 Неверная подпись")
                 return 'Forbidden', 403
             
-            # Use label as payment_id
+
             payment_id = form.get('label')
             if not payment_id:
                 logger.warning("🏷️  Пустой label")
@@ -2170,7 +2170,7 @@ def create_webhook_app(bot_controller_instance):
                     "customer_email": parts[7] if parts[7] != 'None' else None,
                     "payment_method": parts[8]
                 }
-                # Возможные дополнительные поля: promo_code, promo_discount
+
                 if len(parts) >= 10:
                     metadata["promo_code"] = (parts[9] if parts[9] != 'None' else None)
                 if len(parts) >= 11:
@@ -2181,7 +2181,7 @@ def create_webhook_app(bot_controller_instance):
                 payment_processor = handlers.process_successful_payment
 
                 if bot and loop and loop.is_running():
-                    # Обработка промокода до основного обработчика
+
                     try:
                         _handle_promo_after_payment(metadata)
                     except Exception:
@@ -2224,7 +2224,7 @@ def create_webhook_app(bot_controller_instance):
                 if not metadata_str: return 'Error', 400
                 
                 metadata = json.loads(metadata_str)
-                # Обработка промокода
+
                 try:
                     _handle_promo_after_payment(metadata)
                 except Exception:
@@ -2274,7 +2274,7 @@ def create_webhook_app(bot_controller_instance):
             logger.error(f"Ошибка в обработчике вебхука TonAPI: {e}", exc_info=True)
             return 'Error', 500
 
-    # --- YooMoney OAuth integration (optional, for diagnostics and token obtain) ---
+
     def _ym_get_redirect_uri():
         try:
             saved = (get_setting("yoomoney_redirect_uri") or "").strip()
@@ -2348,7 +2348,7 @@ def create_webhook_app(bot_controller_instance):
         if not token:
             flash('YooMoney: токен не задан.', 'warning')
             return redirect(url_for('settings_page', tab='payments'))
-        # 1) account-info
+
         try:
             req = urllib.request.Request('https://yoomoney.ru/api/account-info', headers={'Authorization': f'Bearer {token}'}, method='POST')
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -2367,7 +2367,7 @@ def create_webhook_app(bot_controller_instance):
             flash(f"YooMoney account-info HTTP {ai_status}. {www}", 'danger')
             return redirect(url_for('settings_page', tab='payments'))
         account = ai.get('account') or ai.get('account_number') or '—'
-        # 2) operation-history minimal
+
         try:
             body = urllib.parse.urlencode({'records': '1'}).encode('utf-8')
             req2 = urllib.request.Request('https://yoomoney.ru/api/operation-history', data=body, headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/x-www-form-urlencoded'})
@@ -2385,7 +2385,7 @@ def create_webhook_app(bot_controller_instance):
             flash('YooMoney: не удалось проверить operation-history.', 'warning')
         return redirect(url_for('settings_page', tab='payments'))
 
-    # Button Constructor API endpoints
+
     @flask_app.route('/api/button-configs/<menu_type>')
     @login_required
     @csrf.exempt
@@ -2485,8 +2485,8 @@ def create_webhook_app(bot_controller_instance):
         try:
             data = request.json
             button_orders = data.get('button_orders', [])
-            # logger.info(f"API reorder request for {menu_type}: {len(button_orders)} buttons")  # Убрано для уменьшения логов
-            # logger.info(f"Button orders data: {button_orders}")  # Убрано для уменьшения логов
+
+
             
             success = reorder_button_configs(menu_type, button_orders)
             

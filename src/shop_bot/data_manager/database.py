@@ -8,19 +8,19 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Определяем путь к базе данных
+
 import os
 if os.path.exists("/app/project/users.db"):
-    # Docker контейнер
+
     DB_FILE = Path("/app/project/users.db")
 elif os.path.exists("users-20251005-173430.db"):
-    # Если есть файл с датой, используем его
+
     DB_FILE = Path("users-20251005-173430.db")
 elif os.path.exists("users.db"):
-    # Иначе используем стандартный файл
+
     DB_FILE = Path("users.db")
 else:
-    # Создаем новый файл
+
     DB_FILE = Path("users.db")
 
 
@@ -122,7 +122,7 @@ def initialize_db():
                     referral_start_bonus_received BOOLEAN DEFAULT 0
                 )
             ''')
-            # Pending transactions for external payment flows (TON, YooMoney, Telegram Stars)
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS pending_transactions (
                     payment_id TEXT PRIMARY KEY,
@@ -256,7 +256,7 @@ def initialize_db():
                     FOREIGN KEY (ticket_id) REFERENCES support_tickets (ticket_id)
                 )
             ''')
-            # Индекс для быстрого поиска тикета по паре (forum_chat_id, message_thread_id)
+
             try:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_thread ON support_tickets(forum_chat_id, message_thread_id)")
             except Exception:
@@ -278,7 +278,7 @@ def initialize_db():
                 )
             ''')
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_host_speedtests_host_time ON host_speedtests(host_name, created_at DESC)")
-            # История метрик ресурсов (локально/хосты/ssh-цели)
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS resource_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -295,7 +295,7 @@ def initialize_db():
                 )
             ''')
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_resource_metrics_scope_time ON resource_metrics(scope, object_name, created_at DESC)")
-            # Отдельные SSH-цели для спидтестов (не привязаны к xui_hosts)
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS speedtest_ssh_targets (
                     target_name TEXT PRIMARY KEY,
@@ -346,7 +346,7 @@ def initialize_db():
                 "referral_reward_type": "percent_purchase",
                 "referral_on_start_referrer_amount": "20",
                 "backup_interval_days": "1",
-                # Monitoring
+
                 "monitoring_enabled": "true",
                 "monitoring_interval_sec": "300",
                 "monitoring_cpu_threshold": "90",
@@ -358,14 +358,14 @@ def initialize_db():
                 "remnawave_cookies": "{}",
                 "remnawave_is_local_network": "false",
                 "default_extension_days": "30",
-                # UI texts: main menu and how-to instructions (editable)
+
                 "main_menu_text": None,
                 "howto_intro_text": None,
                 "howto_android_text": None,
                 "howto_ios_text": None,
                 "howto_windows_text": None,
                 "howto_linux_text": None,
-                # UI button labels (main menu and common)
+
                 "btn_trial_text": None,
                 "btn_profile_text": None,
                 "btn_my_keys_text": None,
@@ -378,12 +378,12 @@ def initialize_db():
                 "btn_howto_text": None,
                 "btn_admin_text": None,
                 "btn_back_to_menu_text": None,
-                # Payments: YooMoney and Telegram Stars
+
                 "stars_enabled": "false",
                 "yoomoney_enabled": "false",
                 "yoomoney_wallet": None,
                 "yoomoney_secret": None,
-                # Optional YooMoney OAuth flow support
+
                 "yoomoney_api_token": None,
                 "yoomoney_client_id": None,
                 "yoomoney_client_secret": None,
@@ -398,18 +398,18 @@ def initialize_db():
                 )
             conn.commit()
             
-            # Initialize default button configurations
+
             initialize_default_button_configs()
             
-            # Update existing my_keys button if it exists
+
             update_existing_my_keys_button()
             
-            # Миграция: добавляем поле button_width если его нет
+
             try:
                 cursor.execute("ALTER TABLE button_configs ADD COLUMN button_width INTEGER DEFAULT 1")
                 logging.info("Added button_width column to button_configs table")
             except sqlite3.OperationalError:
-                # Колонка уже существует
+
                 pass
             
             logging.info("База данных инициализирована")
@@ -444,7 +444,7 @@ def _ensure_hosts_columns(cursor: sqlite3.Cursor) -> None:
         "ssh_user": "TEXT",
         "ssh_password": "TEXT",
         "ssh_key_path": "TEXT",
-        # Remnawave per-host API settings
+
         "remnawave_base_url": "TEXT",
         "remnawave_api_token": "TEXT",
     }
@@ -628,12 +628,12 @@ def run_migration():
             _ensure_ssh_targets_table(cursor)
             _ensure_gift_tokens_table(cursor)
             _ensure_promo_tables(cursor)
-            # Ensure thread index exists (safe to create idempotently)
+
             try:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_thread ON support_tickets(forum_chat_id, message_thread_id)")
             except Exception:
                 pass
-            # Ensure pending_transactions table exists for existing databases
+
             try:
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS pending_transactions (
@@ -717,14 +717,14 @@ def get_metrics_series(scope: str, object_name: str, *, since_hours: int = 24, l
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # Для 1-часового периода показываем все доступные данные за последние 2 часа
-            # чтобы гарантировать наличие данных
+
+
             if since_hours == 1:
                 hours_filter = 2
             else:
                 hours_filter = max(1, int(since_hours))
             
-            # SQLite: filter by timestamp interval using datetime('now','-%d hours')
+
             cursor.execute(
                 f'''
                 SELECT created_at, cpu_percent, mem_percent, disk_percent, load1
@@ -743,7 +743,7 @@ def get_metrics_series(scope: str, object_name: str, *, since_hours: int = 24, l
             )
             rows = cursor.fetchall() or []
             
-            # Отладочная информация
+
             logging.debug(f"get_metrics_series: {scope}/{object_name}, since_hours={since_hours}, found {len(rows)} records")
             
             return [dict(r) for r in rows]
@@ -1017,7 +1017,7 @@ def get_all_hosts() -> list[dict]:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM xui_hosts")
             hosts = cursor.fetchall()
-            # Normalize host_name in returned dicts to avoid trailing/invisible chars in runtime
+
             result = []
             for row in hosts:
                 d = dict(row)
@@ -1125,7 +1125,7 @@ def insert_host_speedtest(
         logging.error(f"Не удалось сохранить запись speedtest для '{host_name}': {e}")
         return False
 
-# --- SSH Targets (for speedtest) ---
+
 
 def _ensure_ssh_targets_table(cursor: sqlite3.Cursor) -> None:
     """Миграция: создать таблицу speedtest_ssh_targets при необходимости и добавить недостающие столбцы."""
@@ -1143,7 +1143,7 @@ def _ensure_ssh_targets_table(cursor: sqlite3.Cursor) -> None:
             metadata TEXT
         )
     """)
-    # Гарантируем столбцы (на случай будущих изменений)
+
     extras = {
         "ssh_host": "TEXT",
         "ssh_port": "INTEGER",
@@ -1394,7 +1394,7 @@ def get_admin_stats() -> dict:
         "total_keys": 0,
         "active_keys": 0,
         "total_income": 0.0,
-        # today's metrics
+
         "today_new_users": 0,
         "today_income": 0.0,
         "today_issued_keys": 0,
@@ -1402,22 +1402,22 @@ def get_admin_stats() -> dict:
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            # users
+
             cursor.execute("SELECT COUNT(*) FROM users")
             row = cursor.fetchone()
             stats["total_users"] = (row[0] or 0) if row else 0
 
-            # total keys
+
             cursor.execute("SELECT COUNT(*) FROM vpn_keys")
             row = cursor.fetchone()
             stats["total_keys"] = (row[0] or 0) if row else 0
 
-            # active keys
+
             cursor.execute("SELECT COUNT(*) FROM vpn_keys WHERE expire_at IS NOT NULL AND datetime(expire_at) > CURRENT_TIMESTAMP")
             row = cursor.fetchone()
             stats["active_keys"] = (row[0] or 0) if row else 0
 
-            # income: consider common success markers (total)
+
             cursor.execute(
                 """
                 SELECT COALESCE(SUM(amount_rub), 0)
@@ -1429,15 +1429,15 @@ def get_admin_stats() -> dict:
             row = cursor.fetchone()
             stats["total_income"] = float(row[0] or 0.0) if row else 0.0
 
-            # today's metrics
-            # new users today
+
+
             cursor.execute(
                 "SELECT COUNT(*) FROM users WHERE date(registration_date) = date('now')"
             )
             row = cursor.fetchone()
             stats["today_new_users"] = (row[0] or 0) if row else 0
 
-            # today's income
+
             cursor.execute(
                 """
                 SELECT COALESCE(SUM(amount_rub), 0)
@@ -1450,7 +1450,7 @@ def get_admin_stats() -> dict:
             row = cursor.fetchone()
             stats["today_income"] = float(row[0] or 0.0) if row else 0.0
 
-            # today's issued keys
+
             cursor.execute(
                 "SELECT COUNT(*) FROM vpn_keys WHERE date(COALESCE(created_at, updated_at, CURRENT_TIMESTAMP)) = date('now')"
             )
@@ -1532,7 +1532,7 @@ def get_admin_ids() -> set[int]:
         multi_raw = get_setting("admin_telegram_ids")
         if multi_raw:
             s = (multi_raw or "").strip()
-            # Попробуем как JSON-массив
+
             try:
                 arr = json.loads(s)
                 if isinstance(arr, list):
@@ -1544,7 +1544,7 @@ def get_admin_ids() -> set[int]:
                     return ids
             except Exception:
                 pass
-            # Иначе как строка с разделителями (запятая/пробел)
+
             parts = [p for p in re.split(r"[\s,]+", s) if p]
             for p in parts:
                 try:
@@ -1562,13 +1562,13 @@ def is_admin(user_id: int) -> bool:
     except Exception:
         return False
 
-# --- Pending transactions helpers (YooMoney, Telegram Stars) ---
+
 def create_payload_pending(payment_id: str, user_id: int, amount_rub: float | None, metadata: dict | None) -> bool:
     try:
         print(f"[DEBUG] create_payload_pending called: payment_id={payment_id}, user_id={user_id}, amount_rub={amount_rub}, metadata={metadata}")
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            # Ensure table exists
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS pending_transactions (
                     payment_id TEXT PRIMARY KEY,
@@ -1599,7 +1599,7 @@ def _get_pending_metadata(payment_id: str) -> dict | None:
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            # Ensure table exists
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS pending_transactions (
                     payment_id TEXT PRIMARY KEY,
@@ -1619,7 +1619,7 @@ def _get_pending_metadata(payment_id: str) -> dict | None:
                 meta = json.loads(row["metadata"] or "{}")
             except Exception:
                 meta = {}
-            # Enrich with payment_id if missing
+
             meta.setdefault('payment_id', payment_id)
             return meta
     except sqlite3.Error as e:
@@ -1640,7 +1640,7 @@ def get_pending_status(payment_id: str) -> str | None:
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            # Ensure table exists
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS pending_transactions (
                     payment_id TEXT PRIMARY KEY,
@@ -1709,7 +1709,7 @@ def get_latest_pending_for_user(user_id: int) -> dict | None:
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            # Ensure table exists
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS pending_transactions (
                     payment_id TEXT PRIMARY KEY,
@@ -1790,7 +1790,7 @@ def update_setting(key: str, value: str):
     except sqlite3.Error as e:
         logging.error(f"Failed to update setting '{key}': {e}")
 
-# Button configuration functions
+
 def get_button_configs(menu_type: str) -> list[dict]:
     """Get all button configurations for a specific menu type"""
     try:
@@ -1803,7 +1803,7 @@ def get_button_configs(menu_type: str) -> list[dict]:
                 ORDER BY sort_order, row_position, column_position
             """, (menu_type,))
             results = [dict(row) for row in cursor.fetchall()]
-            # logging.info(f"get_button_configs({menu_type}): found {len(results)} active buttons")  # Убрано для уменьшения логов
+
             return results
     except sqlite3.Error as e:
         logging.error(f"Failed to get button configs for {menu_type}: {e}")
@@ -1856,7 +1856,7 @@ def update_button_config(button_id: int, text: str = None, callback_data: str = 
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             
-            # Build dynamic update query
+
             updates = []
             params = []
             
@@ -1927,7 +1927,7 @@ def update_existing_my_keys_button():
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            # Update my_keys button text
+
             cursor.execute("""
                 UPDATE button_configs 
                 SET text = '🔑 Мои ключи ({len(user_keys)})', updated_at = CURRENT_TIMESTAMP
@@ -1936,11 +1936,11 @@ def update_existing_my_keys_button():
             if cursor.rowcount > 0:
                 logging.info("Updated my_keys button text to include key count template")
             
-            # Update button widths for wide buttons
+
             wide_buttons = [
-                ("trial", 2),      # Широкая кнопка
-                ("referral", 2),   # Широкая кнопка  
-                ("admin", 2),      # Широкая кнопка
+                ("trial", 2),
+                ("referral", 2),
+                ("admin", 2),
             ]
             
             for button_id, width in wide_buttons:
@@ -1971,7 +1971,7 @@ def reorder_button_configs(menu_type: str, button_orders: list[dict]) -> bool:
                 
                 logging.info(f"Updating {button_id}: sort={sort_order}, row={row_position}, col={column_position}, width={button_width}")
                 
-                # Обновляем также button_width, если он передан из конструктора
+
                 if button_width is not None:
                     cursor.execute(
                         """
@@ -1991,7 +1991,7 @@ def reorder_button_configs(menu_type: str, button_orders: list[dict]) -> bool:
                         (sort_order, row_position, column_position, menu_type, button_id),
                     )
                 
-                # Проверяем, была ли обновлена строка
+
                 if cursor.rowcount == 0:
                     logging.warning(f"No button found with menu_type={menu_type}, button_id={button_id}")
                 else:
@@ -2010,26 +2010,26 @@ def initialize_default_button_configs():
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             
-            # Check if button configs already exist
+
             cursor.execute("SELECT COUNT(*) FROM button_configs")
             count = cursor.fetchone()[0]
             if count > 0:
                 logging.info("Button configs already exist, skipping initialization")
                 return True
             
-            # Main menu buttons - (button_id, text, callback_data, row_pos, col_pos, sort_order, button_width)
+
             main_menu_buttons = [
-                ("trial", "🎁 Попробовать бесплатно", "get_trial", 0, 0, 0, 2),  # Широкая кнопка
+                ("trial", "🎁 Попробовать бесплатно", "get_trial", 0, 0, 0, 2),
                 ("profile", "👤 Мой профиль", "show_profile", 1, 0, 1, 1),
                 ("my_keys", "🔑 Мои ключи ({len(user_keys)})", "manage_keys", 1, 1, 2, 1),
                 ("buy_key", "🛒 Купить ключ", "buy_new_key", 2, 0, 3, 1),
                 ("topup", "💳 Пополнить баланс", "top_up_start", 2, 1, 4, 1),
-                ("referral", "🤝 Реферальная программа", "show_referral_program", 3, 0, 5, 2),  # Широкая кнопка
+                ("referral", "🤝 Реферальная программа", "show_referral_program", 3, 0, 5, 2),
                 ("support", "🆘 Поддержка", "show_help", 4, 0, 6, 1),
                 ("about", "ℹ️ О проекте", "show_about", 4, 1, 7, 1),
                 ("speed", "⚡ Скорость", "user_speedtest_last", 5, 0, 8, 1),
                 ("howto", "❓ Как использовать", "howto_vless", 5, 1, 9, 1),
-                ("admin", "⚙️ Админка", "admin_menu", 6, 0, 10, 2),  # Широкая кнопка
+                ("admin", "⚙️ Админка", "admin_menu", 6, 0, 10, 2),
             ]
             
             for button_id, text, callback_data, row_pos, col_pos, sort_order, button_width in main_menu_buttons:
@@ -2039,7 +2039,7 @@ def initialize_default_button_configs():
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, ("main_menu", button_id, text, callback_data, row_pos, col_pos, sort_order, button_width))
             
-            # Admin menu buttons
+
             admin_menu_buttons = [
                 ("users", "👥 Пользователи", "admin_users", 0, 0, 0),
                 ("host_keys", "🌍 Ключи на хосте", "admin_host_keys", 0, 1, 1),
@@ -2061,7 +2061,7 @@ def initialize_default_button_configs():
                     VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                 """, ("admin_menu", button_id, text, callback_data, row_pos, col_pos, sort_order))
             
-            # Profile menu buttons
+
             profile_menu_buttons = [
                 ("topup", "💳 Пополнить баланс", "top_up_start", 0, 0, 0),
                 ("referral", "🤝 Реферальная программа", "show_referral_program", 1, 0, 1),
@@ -2075,7 +2075,7 @@ def initialize_default_button_configs():
                     VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                 """, ("profile_menu", button_id, text, callback_data, row_pos, col_pos, sort_order))
             
-            # Support menu buttons
+
             support_menu_buttons = [
                 ("new_ticket", "✍️ Новое обращение", "support_new_ticket", 0, 0, 0),
                 ("my_tickets", "📨 Мои обращения", "support_my_tickets", 1, 0, 1),
@@ -2172,20 +2172,20 @@ def register_user_if_not_exists(telegram_id: int, username: str, referrer_id):
             cursor.execute("SELECT referred_by FROM users WHERE telegram_id = ?", (telegram_id,))
             row = cursor.fetchone()
             if not row:
-                # Новый пользователь — сразу сохраняем возможного реферера
+
                 cursor.execute(
                     "INSERT INTO users (telegram_id, username, registration_date, referred_by) VALUES (?, ?, ?, ?)",
                     (telegram_id, username, datetime.now(), referrer_id)
                 )
             else:
-                # Пользователь уже есть — обновим username, и если есть реферер и поле пустое, допишем
+
                 cursor.execute("UPDATE users SET username = ? WHERE telegram_id = ?", (username, telegram_id))
                 current_ref = row[0]
                 if referrer_id and (current_ref is None or str(current_ref).strip() == "") and int(referrer_id) != int(telegram_id):
                     try:
                         cursor.execute("UPDATE users SET referred_by = ? WHERE telegram_id = ?", (int(referrer_id), telegram_id))
                     except Exception:
-                        # best-effort
+
                         pass
             conn.commit()
     except sqlite3.Error as e:
@@ -2291,7 +2291,7 @@ def add_to_balance(user_id: int, amount: float) -> bool:
         logging.info(f"💳 Добавляем {amount:.2f} RUB к балансу пользователя {user_id}")
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            # Сначала проверим, существует ли пользователь
+
             cursor.execute("SELECT telegram_id, balance FROM users WHERE telegram_id = ?", (int(user_id),))
             user_row = cursor.fetchone()
             if not user_row:
@@ -2425,7 +2425,7 @@ def get_total_spent_sum() -> float:
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            # Consider only external payments when summing total spent (exclude internal Balance payments)
+
             cursor.execute(
                 """
                 SELECT COALESCE(SUM(amount_rub), 0.0)
@@ -2955,7 +2955,7 @@ def get_users_paginated(page: int = 1, per_page: int = 30, q: str | None = None)
             cursor = conn.cursor()
             if q:
                 q_like = f"%{q.strip()}%"
-                # total
+
                 cursor.execute(
                     """
                     SELECT COUNT(*)
@@ -2966,7 +2966,7 @@ def get_users_paginated(page: int = 1, per_page: int = 30, q: str | None = None)
                     (q_like, q_like),
                 )
                 total = cursor.fetchone()[0] or 0
-                # page data
+
                 cursor.execute(
                     """
                     SELECT *
@@ -2996,7 +2996,7 @@ def get_keys_counts_for_users(user_ids: list[int]) -> dict[int, int]:
     result: dict[int, int] = {}
     if not user_ids:
         return result
-    # SQLite ограничивает количество плейсхолдеров, но здесь страница мала (до сотен), это ок
+
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
@@ -3042,7 +3042,7 @@ def create_support_ticket(user_id: int, subject: str | None = None) -> int | Non
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            # 1) Если уже есть открытый тикет — возвращаем его и НЕ создаём новый
+
             try:
                 cursor.execute(
                     "SELECT ticket_id FROM support_tickets WHERE user_id = ? AND status = 'open' ORDER BY updated_at DESC LIMIT 1",
@@ -3053,7 +3053,7 @@ def create_support_ticket(user_id: int, subject: str | None = None) -> int | Non
                     return int(row[0])
             except Exception:
                 pass
-            # 2) Иначе — создаём новый тикет
+
             cursor.execute(
                 "INSERT INTO support_tickets (user_id, subject) VALUES (?, ?)",
                 (user_id, subject)
@@ -3071,7 +3071,7 @@ def get_or_create_open_ticket(user_id: int, subject: str | None = None) -> tuple
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            # Проверим наличие открытого тикета
+
             cursor.execute(
                 "SELECT ticket_id FROM support_tickets WHERE user_id = ? AND status = 'open' ORDER BY updated_at DESC LIMIT 1",
                 (user_id,)
@@ -3079,7 +3079,7 @@ def get_or_create_open_ticket(user_id: int, subject: str | None = None) -> tuple
             row = cursor.fetchone()
             if row and row[0]:
                 return int(row[0]), False
-            # Создаём новый
+
             cursor.execute(
                 "INSERT INTO support_tickets (user_id, subject) VALUES (?, ?)",
                 (user_id, subject)

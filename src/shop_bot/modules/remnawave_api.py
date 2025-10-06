@@ -11,7 +11,7 @@ import httpx
 from shop_bot.data_manager import remnawave_repository as rw_repo
 
 logger = logging.getLogger(__name__)
-# Уменьшим многословность httpx по умолчанию
+
 try:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 except Exception:
@@ -34,23 +34,23 @@ def _normalize_email_for_remnawave(email: str) -> str:
     if not email:
         raise RemnawaveAPIError("email is required")
     e = (email or "").strip().lower()
-    # Basic split
+
     if "@" not in e:
         raise RemnawaveAPIError(f"Invalid email (no domain): {email}")
     local, domain = e.split("@", 1)
-    # Sanitize local part: allowed a-z0-9._+- ; replace others with '_'
+
     local = re.sub(r"[^a-z0-9._+\-]", "_", local)
-    # Collapse multiple dots
+
     local = re.sub(r"\.+", ".", local)
-    # Trim leading/trailing forbidden chars (dot, underscore, hyphen)
+
     local = local.strip("._-")
-    # Ensure starts with alnum; if not, prefix with 'u'
+
     if not local or not re.match(r"^[a-z0-9]", local):
         local = f"u{local}" if local else f"user{int(datetime.utcnow().timestamp())}"
     e_sanitized = f"{local}@{domain}"
-    # Conservative validator: local-part must start/end with alnum, no consecutive dots, domain has at least one dot
+
     pattern = re.compile(r"^[a-z0-9](?:[a-z0-9._+\-]*[a-z0-9])?@[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?)+$")
-    # Reject consecutive dots explicitly
+
     if ".." in e_sanitized or not pattern.match(e_sanitized):
         raise RemnawaveAPIError(f"Invalid email after normalization: {e_sanitized}")
     return e_sanitized
@@ -73,12 +73,12 @@ def _normalize_username_for_remnawave(name: str | None) -> str:
         base = f"u{base}" if base else f"user{int(datetime.utcnow().timestamp())}"
     if len(base) > 32:
         base = base[:32].rstrip("_-") or base[:32]
-    # Ensure minimum length 3
+
     if len(base) < 3:
-        # Pad with digits from timestamp or 'usr'
+
         suffix = str(int(datetime.utcnow().timestamp()))
         base = (base + suffix)[:3]
-        # As a final fallback
+
         if len(base) < 3:
             base = (base + "usr")[:3]
     return base
@@ -104,7 +104,7 @@ def _load_config_for_host(host_name: str) -> dict[str, Any]:
     base_url = (squad.get("remnawave_base_url") or "").strip().rstrip("/")
     token = (squad.get("remnawave_api_token") or "").strip()
     if not base_url or not token:
-        # Fallback to global settings if present
+
         try:
             return _load_config()
         except RemnawaveAPIError:
@@ -131,13 +131,13 @@ async def _request(
     params: dict[str, Any] | None = None,
     expected_status: tuple[int, ...] = (200,),
 ) -> httpx.Response:
-    # Default to global loader (legacy). Specific host config should call the variant below.
+
     config = _load_config()
     url = f"{config['base_url']}{path}"
     headers = _build_headers(config)
 
     async with httpx.AsyncClient(cookies=config["cookies"], timeout=30.0) as client:
-        # Красивый лог запроса
+
         try:
             full_url = httpx.URL(url).copy_merge_params(params or {})
             logger.info("➡️ Remnawave: %s %s", method.upper(), str(full_url))
@@ -184,7 +184,7 @@ async def _request_for_host(
     headers = _build_headers(config)
 
     async with httpx.AsyncClient(cookies=config["cookies"], timeout=30.0) as client:
-        # Красивые логи HTTP-запроса для конкретного хоста
+
         try:
             full_url = httpx.URL(url).copy_merge_params(params or {})
             logger.info("➡️ Remnawave[%s]: %s %s", host_name, method.upper(), str(full_url))
@@ -235,7 +235,7 @@ async def get_user_by_email(email: str, *, host_name: str | None = None) -> dict
     if response.status_code == 404:
         return None
     payload = response.json()
-    # Some API variants may return { response: {...} } or { response: [...] } or plain {...}
+
     data: Any
     if isinstance(payload, dict):
         inner = payload.get("response")
@@ -244,7 +244,7 @@ async def get_user_by_email(email: str, *, host_name: str | None = None) -> dict
         data = payload
 
     if isinstance(data, list):
-        # If multiple users are returned for an email, pick the first dict item
+
         for item in data:
             if isinstance(item, dict):
                 return item
@@ -283,7 +283,7 @@ async def ensure_user(
     if not squad_uuid:
         raise RemnawaveAPIError("squad_uuid is required for ensure_user")
 
-    # Normalize/validate email once and use for both search and payloads
+
     email = _normalize_email_for_remnawave(email)
     current = await get_user_by_email(email, host_name=host_name)
     expire_iso = _to_iso(expire_at)
@@ -318,7 +318,7 @@ async def ensure_user(
             "activeInternalSquads": [squad_uuid],
             "email": email,
         }
-        # Optional fields: include only if not None/empty to avoid API validation errors
+
         if traffic_limit_bytes is not None:
             payload["trafficLimitBytes"] = traffic_limit_bytes
         if traffic_limit_strategy is not None:
@@ -345,7 +345,7 @@ async def ensure_user(
             "activeInternalSquads": [squad_uuid],
             "email": email,
         }
-        # Optional fields for create as well
+
         if traffic_limit_bytes is not None:
             payload["trafficLimitBytes"] = traffic_limit_bytes
         if traffic_limit_strategy is not None:
@@ -362,7 +362,7 @@ async def ensure_user(
     result = data.get("response") if isinstance(data, dict) else None
     if not result:
         raise RemnawaveAPIError("Remnawave API returned unexpected payload")
-    # Красивые логи об успешном действии
+
     action = "создан" if method == "POST" else "обновлён"
     logger.info(
         "Remnawave: пользователь %s (%s) на '%s' успешно %s. Истекает: %s",
@@ -538,7 +538,7 @@ async def get_key_details_from_host(key_data: dict) -> dict | None:
         user_payload = None
         host_name = key_data.get('host_name')
         if not host_name:
-            # try by squad
+
             sq = key_data.get('squad_uuid') or key_data.get('squadUuid')
             if sq:
                 squad = rw_repo.get_squad(sq)
@@ -565,13 +565,13 @@ async def get_key_details_from_host(key_data: dict) -> dict | None:
 
 async def delete_client_on_host(host_name: str, client_email: str) -> bool:
     try:
-        # Always query on the specific host; normalize potential list responses defensively
+
         user_payload = await get_user_by_email(client_email, host_name=host_name)
         if not user_payload:
             logger.info("Remnawave: пользователь %s уже отсутствует", client_email)
             return True
         if isinstance(user_payload, list):
-            # Defensive: choose the first dict entry if API returned a list
+
             user_payload = next((u for u in user_payload if isinstance(u, dict)), None)
         user_uuid = user_payload.get('uuid') if isinstance(user_payload, dict) else None
         if not user_uuid:

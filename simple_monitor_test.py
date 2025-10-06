@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 Упрощенный скрипт для тестирования мониторинга без дополнительных зависимостей
 """
@@ -8,14 +8,14 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 
-# Добавляем путь к модулям проекта
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 def test_database():
     """Проверяем базу данных"""
     print("🔍 Проверка базы данных...")
     
-    # Ищем файл базы данных
+
     db_files = [
         "users-20251005-173430.db",
         "users.db",
@@ -38,7 +38,7 @@ def test_database():
         with sqlite3.connect(db_file) as conn:
             cursor = conn.cursor()
             
-            # Проверяем таблицу
+
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resource_metrics'")
             if not cursor.fetchone():
                 print("❌ Таблица resource_metrics не существует")
@@ -46,13 +46,13 @@ def test_database():
             
             print("✅ Таблица resource_metrics существует")
             
-            # Проверяем количество записей
+
             cursor.execute("SELECT COUNT(*) FROM resource_metrics")
             count = cursor.fetchone()[0]
             print(f"📊 Записей в таблице: {count}")
             
             if count > 0:
-                # Проверяем последние записи
+
                 cursor.execute("""
                     SELECT scope, object_name, created_at, cpu_percent, mem_percent, disk_percent 
                     FROM resource_metrics 
@@ -64,7 +64,7 @@ def test_database():
                 for row in rows:
                     print(f"  - {row[0]}/{row[1]} | {row[2]} | CPU:{row[3]}% MEM:{row[4]}% DISK:{row[5]}%")
                 
-                # Проверяем данные за последний час
+
                 cursor.execute("""
                     SELECT COUNT(*) FROM resource_metrics 
                     WHERE scope = 'local' AND object_name = 'panel'
@@ -92,7 +92,7 @@ def test_settings():
     print("\n🔧 Проверка настроек...")
     
     try:
-        # Импортируем только необходимые модули
+
         from shop_bot.data_manager.database import get_setting
         
         monitoring_enabled = get_setting("monitoring_enabled")
@@ -119,10 +119,10 @@ def test_metrics_collection():
     print("\n🖥️  Тестирование сбора метрик...")
     
     try:
-        # Пробуем импортировать psutil
+
         import psutil
         
-        # Собираем базовые метрики
+
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
@@ -149,13 +149,13 @@ def insert_test_metric():
     try:
         from shop_bot.data_manager.database import insert_resource_metric
         
-        # Собираем простые метрики
+
         import psutil
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
         
-        # Вставляем метрику
+
         metric_id = insert_resource_metric(
             scope='local',
             object_name='panel',
@@ -189,20 +189,20 @@ def main():
     print("🚀 Упрощенное тестирование системы мониторинга")
     print("=" * 60)
     
-    # Проверяем базу данных
+
     db_ok = test_database()
     
-    # Проверяем настройки
+
     settings_ok = test_settings()
     
-    # Тестируем сбор метрик
+
     metrics_ok = test_metrics_collection()
     
-    # Вставляем тестовую метрику
+
     if metrics_ok:
         insert_ok = insert_test_metric()
     else:
-        insert_ok = True  # Пропускаем если psutil не установлен
+        insert_ok = True
     
     print("\n" + "=" * 60)
     print("📋 РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ:")

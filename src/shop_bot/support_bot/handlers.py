@@ -286,7 +286,7 @@ def get_support_router() -> Router:
                 f"✉️ Сообщение добавлено в ваш открытый тикет #{ticket_id}.",
                 reply_markup=_user_main_reply_kb()
             )
-        # Уведомить всех администраторов
+
         try:
             for aid in get_admin_ids():
                 try:
@@ -508,7 +508,7 @@ def get_support_router() -> Router:
             me = await bot.get_me()
             if message.from_user and message.from_user.id == me.id:
                 return
-            # многоадминная проверка
+
             is_admin_by_setting = is_admin(message.from_user.id)
             is_admin_in_chat = False
             try:
@@ -672,7 +672,7 @@ def get_support_router() -> Router:
             return
         ticket = get_ticket(ticket_id)
         if not ticket:
-            # Сообщение в треде может уже не существовать — используем callback.answer
+
             try:
                 await callback.answer("Тикет уже удалён или не найден.", show_alert=False)
             except Exception:
@@ -681,16 +681,16 @@ def get_support_router() -> Router:
         forum_chat_id = int(ticket.get('forum_chat_id') or callback.message.chat.id)
         if not await _is_admin(bot, forum_chat_id, callback.from_user.id):
             return
-        # Постараемся заранее обновить UI (до удаления треда)
+
         try:
             await callback.message.edit_text(
                 f"🗑 Удаляю тикет #{ticket_id}..."
             )
         except Exception:
-            # Если сообщение уже исчезло/в другом состоянии — игнор
+
             pass
 
-        # Удаляем/закрываем тред
+
         try:
             thread_id = ticket.get('message_thread_id') or getattr(callback.message, 'message_thread_id', None)
             if thread_id:
@@ -704,10 +704,10 @@ def get_support_router() -> Router:
         except Exception:
             pass
 
-        # Удаляем запись тикета из БД
+
         ok = delete_ticket(ticket_id)
         if ok:
-            # После удаления треда нельзя редактировать/слать в него сообщения — используем callback.answer
+
             try:
                 await callback.answer(f"🗑 Тикет #{ticket_id} удалён.", show_alert=False)
             except Exception:
@@ -876,7 +876,7 @@ def get_support_router() -> Router:
             await callback.message.answer(f"❌ Не удалось забанить пользователя: {e}")
             return
         await callback.message.answer(f"🚫 Пользователь {user_id} забанен.")
-        # уведомим пользователя и обновим панель без дополнительных сообщений в треде
+
         await _notify_user_about_ban(bot, user_id, "🚫 Ваш аккаунт был заблокирован администратором. Если это ошибка — свяжитесь с поддержкой.")
         try:
             await callback.message.edit_reply_markup(reply_markup=_admin_actions_kb(ticket_id))
@@ -907,7 +907,7 @@ def get_support_router() -> Router:
             await callback.message.answer(f"❌ Не удалось разбанить пользователя: {e}")
             return
         await callback.message.answer(f"✅ Пользователь {user_id} разбанен.")
-        # только личное уведомление без дублирования в треде
+
         try:
             await bot.send_message(user_id, "✅ Ваш аккаунт был разблокирован. Вы снова можете пользоваться ботом.")
         except Exception:

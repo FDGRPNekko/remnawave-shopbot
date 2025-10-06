@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 Упрощенный скрипт для принудительного сбора метрик
 """
@@ -7,7 +7,7 @@ import os
 import json
 from datetime import datetime
 
-# Добавляем путь к модулям проекта
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 def collect_metrics_simple():
@@ -15,10 +15,10 @@ def collect_metrics_simple():
     print("🔄 Принудительный сбор метрик...")
     
     try:
-        # Пробуем импортировать psutil
+
         import psutil
         
-        # Собираем метрики
+
         print("📊 Сбор метрик...")
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
@@ -29,7 +29,7 @@ def collect_metrics_simple():
         print(f"  - Memory: {memory.percent}%")
         print(f"  - Disk: {disk.percent}%")
         
-        # Сохраняем в базу
+
         print("💾 Сохранение в базу данных...")
         from shop_bot.data_manager.database import insert_resource_metric, get_latest_resource_metric, get_metrics_series
         
@@ -50,7 +50,7 @@ def collect_metrics_simple():
         if metric_id:
             print(f"✅ Метрика сохранена с ID: {metric_id}")
             
-            # Проверяем сохранение
+
             latest = get_latest_resource_metric('local', 'panel')
             if latest:
                 print("✅ Метрика найдена в базе:")
@@ -60,7 +60,7 @@ def collect_metrics_simple():
                 print(f"  - Memory: {latest.get('mem_percent')}%")
                 print(f"  - Disk: {latest.get('disk_percent')}%")
                 
-                # Проверяем данные для 1-часового периода
+
                 print("\n📊 Проверка данных для 1-часового периода...")
                 series_1h = get_metrics_series('local', 'panel', since_hours=1, limit=10)
                 print(f"Найдено {len(series_1h)} записей за последний час")

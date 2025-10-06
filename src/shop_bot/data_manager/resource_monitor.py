@@ -6,9 +6,9 @@ import logging
 from typing import Any, Dict, List
 
 try:
-    import psutil  # type: ignore
-except Exception:  # pragma: no cover
-    psutil = None  # will be None if not installed; caller should handle
+    import psutil
+except Exception:
+    psutil = None
 
 from shop_bot.data_manager import remnawave_repository as rw_repo
 from shop_bot.data_manager import speedtest_runner
@@ -48,20 +48,20 @@ def get_local_metrics() -> Dict[str, Any]:
             data["ok"] = False
             data["error"] = "psutil not installed"
             logger.warning("psutil не установлен - мониторинг недоступен")
-            # Минимум без psutil
+
             try:
                 data["uptime_sec"] = max(0, int(time.time() - psutil.boot_time())) if psutil else None
             except Exception:
                 pass
             return data
 
-        # Uptime
+
         try:
             data["uptime_sec"] = max(0, int(time.time() - psutil.boot_time()))
         except Exception:
             data["uptime_sec"] = None
 
-        # CPU
+
         try:
             data["cpu"] = {
                 "count_logical": psutil.cpu_count(logical=True),
@@ -70,13 +70,13 @@ def get_local_metrics() -> Dict[str, Any]:
                 "loadavg": None,
             }
             try:
-                data["cpu"]["loadavg"] = os.getloadavg()  # type: ignore[attr-defined]
+                data["cpu"]["loadavg"] = os.getloadavg()
             except Exception:
                 data["cpu"]["loadavg"] = None
         except Exception:
             data["cpu"] = {}
 
-        # Memory
+
         try:
             vm = psutil.virtual_memory()
             data["memory"] = {
@@ -88,7 +88,7 @@ def get_local_metrics() -> Dict[str, Any]:
         except Exception:
             data["memory"] = {}
 
-        # Swap
+
         try:
             sm = psutil.swap_memory()
             data["swap"] = {
@@ -99,11 +99,11 @@ def get_local_metrics() -> Dict[str, Any]:
         except Exception:
             data["swap"] = {}
 
-        # Disks
+
         disks: List[Dict[str, Any]] = []
         try:
             for part in psutil.disk_partitions(all=False):
-                # Пропускаем виртуальные ФС
+
                 if any(x in (part.fstype or '').lower() for x in ["tmpfs", "devtmpfs", "squashfs", "overlay"]):
                     continue
                 try:
@@ -123,14 +123,14 @@ def get_local_metrics() -> Dict[str, Any]:
             pass
         data["disks"] = disks
         
-        # Вычисляем общий процент использования диска
+
         try:
             disk_percents = [d.get('percent') for d in data["disks"] or [] if d.get('percent') is not None]
             data["disk_percent"] = max(disk_percents) if disk_percents else None
         except Exception:
             data["disk_percent"] = None
 
-        # Network (totals)
+
         try:
             io = psutil.net_io_counters()
             data["net"] = {
@@ -148,13 +148,13 @@ def get_local_metrics() -> Dict[str, Any]:
             logger.warning(f"Ошибка получения сетевых данных: {e}")
             data["net"] = {}
 
-        # Processes
+
         try:
             processes = []
             for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
                 try:
                     proc_info = proc.info
-                    if proc_info['cpu_percent'] > 0 or proc_info['memory_percent'] > 1:  # Только активные процессы
+                    if proc_info['cpu_percent'] > 0 or proc_info['memory_percent'] > 1:
                         processes.append({
                             'pid': proc_info['pid'],
                             'name': proc_info['name'],
@@ -165,13 +165,13 @@ def get_local_metrics() -> Dict[str, Any]:
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
             
-            # Сортируем по использованию CPU и берем топ-10
+
             processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
             data["top_processes"] = processes[:10]
         except Exception:
             data["top_processes"] = []
 
-        # System load (более детальная информация)
+
         try:
             if hasattr(psutil, 'getloadavg'):
                 load_avg = psutil.getloadavg()
@@ -183,7 +183,7 @@ def get_local_metrics() -> Dict[str, Any]:
         except Exception:
             data["load_avg"] = {}
 
-        # Temperature (если доступно)
+
         try:
             if hasattr(psutil, 'sensors_temperatures'):
                 temps = psutil.sensors_temperatures()
@@ -199,7 +199,7 @@ def get_local_metrics() -> Dict[str, Any]:
         except Exception:
             data["temperatures"] = {}
 
-        # Boot time
+
         try:
             boot_time = psutil.boot_time()
             data["boot_time"] = boot_time
@@ -213,17 +213,17 @@ def get_local_metrics() -> Dict[str, Any]:
 
 
 def _parse_free_m(text: str) -> Dict[str, Any]:
-    # Парсим вывод free -m
-    # Example:
-    #               total        used        free      shared  buff/cache   available
-    # Mem:           7829        1121        5268         118        1439        6377
+
+
+
+
     out: Dict[str, Any] = {}
     try:
         lines = [l for l in (text or '').splitlines() if l.strip()]
         for ln in lines:
             if ln.lower().startswith("mem:"):
                 parts = [p for p in ln.split() if p]
-                # ['Mem:', '7829', '1121', '5268', '118', '1439', '6377']
+
                 if len(parts) >= 7:
                     total = int(parts[1])
                     used = int(parts[2])
@@ -254,7 +254,7 @@ def _parse_df_h(text: str) -> List[Dict[str, Any]]:
     disks: List[Dict[str, Any]] = []
     try:
         lines = [l for l in (text or '').splitlines() if l.strip()]
-        # Skip header if present
+
         if lines and ("Filesystem" in lines[0] or "Source" in lines[0] or "Size" in lines[0]):
             lines = lines[1:]
         for ln in lines:
@@ -283,7 +283,7 @@ def _compute_cpu_percent(loadavg: List[float] | None, cpu_count: int | None) -> 
         if not loadavg or cpu_count is None or cpu_count <= 0:
             return None
         value = (float(loadavg[0]) / float(cpu_count)) * 100.0
-        # Ограничим диапазон адекватными значениями
+
         if value < 0:
             return 0.0
         return round(value, 2)
@@ -307,19 +307,19 @@ def get_remote_metrics_for_host(host_name: str) -> Dict[str, Any]:
     try:
         metrics: Dict[str, Any] = {"ok": True}
         cpu_count = None
-        # Uname
+
         try:
             rc, out, err = speedtest_runner._ssh_exec(ssh, "uname -srmo 2>/dev/null || uname -a")
             metrics["uname"] = (out or err or '').strip()
         except Exception:
             metrics["uname"] = None
-        # Uptime
+
         try:
             rc, out, err = speedtest_runner._ssh_exec(ssh, "cat /proc/uptime || uptime -p")
             txt = (out or err or '').strip()
             up_sec = None
             try:
-                # /proc/uptime: "12345.67 8910.11"
+
                 first = float(txt.split()[0])
                 up_sec = int(first)
             except Exception:
@@ -327,13 +327,13 @@ def get_remote_metrics_for_host(host_name: str) -> Dict[str, Any]:
             metrics["uptime_sec"] = up_sec
         except Exception:
             metrics["uptime_sec"] = None
-        # Loadavg
+
         try:
             rc, out, err = speedtest_runner._ssh_exec(ssh, "cat /proc/loadavg")
             metrics["loadavg"] = _parse_loadavg(out)
         except Exception:
             metrics["loadavg"] = None
-        # CPU count
+
         try:
             rc, out, err = speedtest_runner._ssh_exec(
                 ssh,
@@ -345,7 +345,7 @@ def get_remote_metrics_for_host(host_name: str) -> Dict[str, Any]:
             cpu_count = None
         metrics["cpu_count"] = cpu_count
         metrics["cpu_percent"] = _compute_cpu_percent(metrics.get("loadavg"), cpu_count)
-        # Memory
+
         try:
             rc, out, err = speedtest_runner._ssh_exec(ssh, "free -m")
             mem = _parse_free_m(out)
@@ -354,7 +354,7 @@ def get_remote_metrics_for_host(host_name: str) -> Dict[str, Any]:
         except Exception:
             metrics["memory"] = {}
             metrics["mem_percent"] = None
-        # Disks
+
         try:
             rc, out, err = speedtest_runner._ssh_exec(ssh, "df -h -x tmpfs -x devtmpfs --output=source,size,used,avail,pcent,target | tail -n +2")
             metrics["disks"] = _parse_df_h(out)
@@ -366,7 +366,7 @@ def get_remote_metrics_for_host(host_name: str) -> Dict[str, Any]:
         except Exception:
             metrics["disk_percent"] = None
         
-        # Добавляем дополнительные поля для совместимости с фронтендом
+
         if metrics.get("memory"):
             mem = metrics["memory"]
             metrics["memory_percent"] = mem.get("percent")
@@ -377,20 +377,20 @@ def get_remote_metrics_for_host(host_name: str) -> Dict[str, Any]:
             first_disk = metrics["disks"][0]
             metrics["disk_mountpoint"] = first_disk.get("mountpoint", "/")
         
-        # Сетевые данные через SSH
+
         try:
             rc, out, err = speedtest_runner._ssh_exec(ssh, "cat /proc/net/dev | grep -E 'eth0|ens|enp|wlan0' | head -1")
             if not out or err:
-                # Если не нашли, пробуем получить данные с первого активного интерфейса
+
                 rc, out, err = speedtest_runner._ssh_exec(ssh, "cat /proc/net/dev | grep -v 'lo:' | grep -v 'docker' | grep -v 'veth' | tail -n +3 | head -1")
             if out and not err:
-                # Парсим /proc/net/dev для получения сетевых данных
+
                 parts = out.strip().split()
                 if len(parts) >= 10:
-                    metrics["network_recv"] = int(parts[1])  # bytes received
-                    metrics["network_sent"] = int(parts[9])  # bytes sent
-                    metrics["network_packets_recv"] = int(parts[2])  # packets received
-                    metrics["network_packets_sent"] = int(parts[10])  # packets sent
+                    metrics["network_recv"] = int(parts[1])
+                    metrics["network_sent"] = int(parts[9])
+                    metrics["network_packets_recv"] = int(parts[2])
+                    metrics["network_packets_sent"] = int(parts[10])
                     logger.debug(f"Сетевые данные получены через SSH: sent={parts[9]}, recv={parts[1]}")
                 else:
                     metrics["network_recv"] = 0
@@ -422,7 +422,7 @@ def get_remote_metrics_for_target(target_name: str) -> Dict[str, Any]:
         return {"ok": False, "error": "target not found"}
     host_row = speedtest_runner._target_to_host_row(target)
     try:
-        ssh = speedtest_runner._ssh_connect(host_row)  # type: ignore[arg-type]
+        ssh = speedtest_runner._ssh_connect(host_row)
     except Exception as e:
         return {"ok": False, "error": f"SSH connect failed: {e}"}
 
@@ -450,7 +450,7 @@ def get_remote_metrics_for_target(target_name: str) -> Dict[str, Any]:
             metrics["loadavg"] = _parse_loadavg(out)
         except Exception:
             metrics["loadavg"] = None
-        # CPU count
+
         try:
             rc, out, err = speedtest_runner._ssh_exec(
                 ssh,
@@ -481,7 +481,7 @@ def get_remote_metrics_for_target(target_name: str) -> Dict[str, Any]:
         except Exception:
             metrics["disk_percent"] = None
         
-        # Добавляем дополнительные поля для совместимости с фронтендом
+
         if metrics.get("memory"):
             mem = metrics["memory"]
             metrics["memory_percent"] = mem.get("percent")
@@ -492,20 +492,20 @@ def get_remote_metrics_for_target(target_name: str) -> Dict[str, Any]:
             first_disk = metrics["disks"][0]
             metrics["disk_mountpoint"] = first_disk.get("mountpoint", "/")
         
-        # Сетевые данные через SSH
+
         try:
             rc, out, err = speedtest_runner._ssh_exec(ssh, "cat /proc/net/dev | grep -E 'eth0|ens|enp|wlan0' | head -1")
             if not out or err:
-                # Если не нашли, пробуем получить данные с первого активного интерфейса
+
                 rc, out, err = speedtest_runner._ssh_exec(ssh, "cat /proc/net/dev | grep -v 'lo:' | grep -v 'docker' | grep -v 'veth' | tail -n +3 | head -1")
             if out and not err:
-                # Парсим /proc/net/dev для получения сетевых данных
+
                 parts = out.strip().split()
                 if len(parts) >= 10:
-                    metrics["network_recv"] = int(parts[1])  # bytes received
-                    metrics["network_sent"] = int(parts[9])  # bytes sent
-                    metrics["network_packets_recv"] = int(parts[2])  # packets received
-                    metrics["network_packets_sent"] = int(parts[10])  # packets sent
+                    metrics["network_recv"] = int(parts[1])
+                    metrics["network_sent"] = int(parts[9])
+                    metrics["network_packets_recv"] = int(parts[2])
+                    metrics["network_packets_sent"] = int(parts[10])
                     logger.debug(f"Сетевые данные получены через SSH: sent={parts[9]}, recv={parts[1]}")
                 else:
                     metrics["network_recv"] = 0

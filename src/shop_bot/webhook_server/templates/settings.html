@@ -619,7 +619,7 @@
 							<input class="form-control pill-md" type="number" id="minimum_withdrawal" name="minimum_withdrawal" value="{{ settings.minimum_withdrawal or '10' }}" />
 						</div>
 
-						<!-- Percent mode -->
+						
 						<div class="mb-3" data-ref-section="percent_purchase">
 							<label class="form-label" for="referral_percentage">Процент вознаграждения пригласившему</label>
 							<div class="input-group with-suffix">
@@ -628,7 +628,7 @@
                             </div>
 							<div class="form-text text-secondary">Начисляется рефереру от суммы каждой покупки приглашённого.</div>
 						</div>
-						<!-- Fixed per purchase mode -->
+						
 						<div class="mb-3" data-ref-section="fixed_purchase">
 							<label class="form-label" for="fixed_referral_bonus_amount">Фиксированная сумма за покупку</label>
 							<div class="input-group with-suffix">
@@ -638,7 +638,7 @@
                             <div class="form-text text-secondary">Каждая покупка приглашённого начисляет рефереру фиксированную сумму.</div>
                         </div>
 
-                        <!-- Fixed start bonus to referrer on start mode -->
+                        
                         <div class="mb-3" data-ref-section="fixed_start_referrer">
                             <label class="form-label" for="referral_on_start_referrer_amount">Бонус пригласившему при старте (RUB)</label>
                             <div class="input-group with-suffix">
@@ -648,7 +648,7 @@
                             <div class="form-text text-secondary">Единоразово начисляется пригласившему, когда новый пользователь запускает бота по его реферальной ссылке.</div>
                         </div>
 
-						<!-- Backward compatibility hidden flag (not shown) -->
+						
 						<input type="hidden" id="enable_fixed_referral_bonus" name="enable_fixed_referral_bonus" value="{% if settings.enable_fixed_referral_bonus == 'true' %}true{% else %}false{% endif %}" />
 
 						<div class="mb-3">

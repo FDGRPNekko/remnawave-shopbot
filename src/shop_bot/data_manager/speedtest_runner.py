@@ -47,7 +47,7 @@ async def net_probe_for_host(host_row: dict) -> dict:
         result['error'] = f'Invalid host_url: {url}'
         return result
 
-    # TCP connect timing
+
     try:
         loop = asyncio.get_event_loop()
         start = loop.time()
@@ -65,7 +65,7 @@ async def net_probe_for_host(host_row: dict) -> dict:
         result['error'] = f'TCP connect failed: {e}'
         return result
 
-    # HTTP HEAD/GET timing
+
     try:
         async with aiohttp.ClientSession() as session:
             start = asyncio.get_event_loop().time()
@@ -75,7 +75,7 @@ async def net_probe_for_host(host_row: dict) -> dict:
             result['http_ms'] = round(http_ms, 2)
         result['ok'] = True
     except Exception:
-        # fallback to GET if HEAD not supported
+
         try:
             async with aiohttp.ClientSession() as session:
                 start = asyncio.get_event_loop().time()
@@ -98,7 +98,7 @@ def _ssh_exec_json(ssh: paramiko.SSHClient, commands: list[str]) -> tuple[dict |
             err = stderr.read().decode('utf-8', errors='ignore')
             if out:
                 out = out.strip()
-                # attempt to extract JSON if there is noise
+
                 m = re.search(r"\{.*\}$", out, re.S)
                 if m:
                     out = m.group(0)
@@ -116,11 +116,11 @@ def _ssh_exec_json(ssh: paramiko.SSHClient, commands: list[str]) -> tuple[dict |
 
 
 def _parse_ookla_json(data: dict) -> dict:
-    # Ookla CLI JSON format (-f json)
+
     try:
         ping_ms = float(data.get('ping', {}).get('latency')) if data.get('ping') else None
         jitter = float(data.get('ping', {}).get('jitter')) if data.get('ping') else None
-        down_bps = float(data.get('download', {}).get('bandwidth', 0)) * 8.0  # bytes/s -> bits/s
+        down_bps = float(data.get('download', {}).get('bandwidth', 0)) * 8.0
         up_bps = float(data.get('upload', {}).get('bandwidth', 0)) * 8.0
         server = data.get('server', {})
         return {
@@ -136,11 +136,11 @@ def _parse_ookla_json(data: dict) -> dict:
 
 
 def _parse_speedtest_cli_json(data: dict) -> dict:
-    # speedtest-cli (sivel) JSON
+
     try:
         ping_ms = float(data.get('ping')) if data.get('ping') is not None else None
         jitter = None
-        down_bps = float(data.get('download', 0))  # bits per second
+        down_bps = float(data.get('download', 0))
         up_bps = float(data.get('upload', 0))
         srv = data.get('server', {})
         return {
@@ -196,22 +196,22 @@ async def ssh_speedtest_for_host(host_row: dict) -> dict:
         else:
             ssh.connect(ssh_host, port=ssh_port, username=ssh_user, password=ssh_password, timeout=20)
 
-        # Prefer Ookla CLI json format
+
         data, err = _ssh_exec_json(ssh, [
-            # Ookla CLI with auto-accept (new flags)
+
             'speedtest --accept-license --accept-gdpr -f json',
             'speedtest --accept-license --accept-gdpr --format=json',
-            # Fallbacks without flags (на случай старых версий, уже принявших лицензию)
+
             'speedtest -f json',
             'speedtest --format=json',
-            # Python speedtest-cli (sivel)
+
             'speedtest-cli --json'
         ])
         ssh.close()
         if data:
             parsed = _parse_ookla_json(data)
             if not parsed.get('download_mbps') and 'download' in data:
-                # maybe speedtest-cli output
+
                 parsed = _parse_speedtest_cli_json(data)
             return {'ok': True, **parsed}
         return {'ok': False, 'error': err or 'unknown'}
@@ -337,16 +337,16 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
         except Exception as e:
             return {'ok': False, 'log': f'SSH connect failed: {e}'}
         try:
-            # If already installed
+
             rc, out, err = _ssh_exec(ssh, 'command -v speedtest || command -v speedtest-cli || echo "NO"')
             if 'speedtest' in out or 'speedtest-cli' in out:
                 log_lines.append('Found existing speedtest binary: ' + out.strip())
-                # Проверим версию и примем лицензию
+
                 rc2, o2, e2 = _ssh_exec(ssh, 'speedtest --accept-license --accept-gdpr --version || true')
                 ver_text = (o2 + e2).strip()
                 if ver_text:
                     log_lines.append(('$ speedtest --accept-license --accept-gdpr --version\n' + ver_text).strip())
-                # Если версия не 1.2.0 — выполним переустановку через tarball ниже
+
                 need_reinstall = True
                 try:
                     if '1.2.0' in ver_text:
@@ -358,16 +358,16 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
                 else:
                     log_lines.append('Different Ookla speedtest version detected; reinstalling 1.2.0 via tarball.')
 
-            # Detect OS info
+
             rc, out, _ = _ssh_exec(ssh, 'cat /etc/os-release || uname -a')
             os_release = out.lower()
             log_lines.append('OS detection: ' + out.strip())
 
-            # Сначала: УСТАНОВКА ЧЕРЕЗ TARBALL СТРОГОЙ ВЕРСИИ 1.2.0 (предпочтительно)
-            # Detect arch
+
+
             rc, arch_out, _ = _ssh_exec(ssh, 'uname -m || echo unknown')
             arch = (arch_out or '').strip()
-            # Map to Ookla naming
+
             if arch in ('x86_64', 'amd64'):
                 arch_tag = 'linux-x86_64'
             elif arch in ('aarch64', 'arm64'):
@@ -381,7 +381,7 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
                 f'curl -fsSL {tar_url} -o /tmp/ookla-speedtest.tgz || wget -O /tmp/ookla-speedtest.tgz {tar_url}',
                 'mkdir -p /tmp/ookla-speedtest && tar -xf /tmp/ookla-speedtest.tgz -C /tmp/ookla-speedtest',
                 'install -m 0755 /tmp/ookla-speedtest/speedtest /usr/local/bin/speedtest || (cp /tmp/ookla-speedtest/speedtest /usr/local/bin/speedtest && chmod +x /usr/local/bin/speedtest)',
-                # Принятие лицензии сразу после установки бинаря (идемпотентно)
+
                 'speedtest --accept-license --accept-gdpr --version || true',
                 'rm -rf /tmp/ookla-speedtest /tmp/ookla-speedtest.tgz'
             ]
@@ -389,7 +389,7 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
                 rc, o, e = _ssh_exec(ssh, c)
                 log_lines.append(f'$ {c}\n{o}{e}'.strip())
 
-            # Verify version is exactly 1.2.0
+
             rc, out, err = _ssh_exec(ssh, 'command -v speedtest || echo "NO"')
             if 'NO' not in out:
                 rcv, ov, ev = _ssh_exec(ssh, 'speedtest --version 2>&1 || true')
@@ -400,7 +400,7 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
                 else:
                     log_lines.append('Tarball install finished but version check did not return 1.2.0; continuing fallbacks.')
 
-            # Если по какой-то причине tarball не сработал — пробуем официальный репозиторий (м.б. недоступен на noble)
+
             cmds_deb = [
                 'which sudo || true',
                 'export DEBIAN_FRONTEND=noninteractive',
@@ -424,37 +424,37 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
                     rc, o, e = _ssh_exec(ssh, c)
                     log_lines.append(f'$ {c}\n{o}{e}'.strip())
 
-            # Check again
+
             rc, out, err = _ssh_exec(ssh, 'command -v speedtest || command -v speedtest-cli || echo "NO"')
             if 'speedtest' in out or 'speedtest-cli' in out:
                 log_lines.append('Installed speedtest successfully: ' + out.strip())
-                # Автопринятие лицензии для Ookla CLI, если присутствует
+
                 rc2, o2, e2 = _ssh_exec(ssh, 'speedtest --accept-license --accept-gdpr --version || true')
                 if o2 or e2:
                     log_lines.append(('$ speedtest --accept-license --accept-gdpr --version\n' + (o2 + e2)).strip())
                 return {'ok': True, 'log': '\n'.join(log_lines)}
 
-            # Fallback: try install speedtest-cli via pip
+
             pip_try = [
                 'command -v python3 || command -v python || echo NO',
                 'command -v pip3 || command -v pip || (apt-get update -y && apt-get install -y python3-pip) || (yum -y install python3-pip || dnf -y install python3-pip) || true',
                 'pip3 install --upgrade pip || true',
                 'pip3 install speedtest-cli || pip install speedtest-cli || true',
-                # create symlink if needed
+
                 'command -v speedtest-cli || (which python3 && python3 -m pip show speedtest-cli && ln -sf $(python3 -c "import shutil,sys; import os; print(shutil.which(\"speedtest-cli\") or \"/usr/local/bin/speedtest-cli\")") /usr/local/bin/speedtest-cli) || true'
             ]
             for c in pip_try:
                 rc, o, e = _ssh_exec(ssh, c)
                 log_lines.append(f'$ {c}\n{o}{e}'.strip())
 
-            # Final check
+
             rc, out, err = _ssh_exec(ssh, 'command -v speedtest || command -v speedtest-cli || echo "NO"')
             if 'NO' not in out:
                 log_lines.append('Installed speedtest-cli via pip: ' + out.strip())
                 return {'ok': True, 'log': '\n'.join(log_lines)}
 
-            # Последний фоллбек: ставим python-пакет speedtest-cli (не Ookla), если всё остальное не сработало
-            # (этот шаг оставлен выше по коду — уже выполнен; если не сработал — выдаём ошибку ниже)
+
+
 
             return {'ok': False, 'log': 'Failed to install speedtest using available methods.\n' + '\n'.join(log_lines)}
         finally:
@@ -467,7 +467,7 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
     return await loop.run_in_executor(None, _install)
 
 
-# --- Support separate SSH targets (not tied to xui_hosts) ---
+
 
 def _target_to_host_row(target: dict) -> dict:
     return {
@@ -514,7 +514,7 @@ async def auto_install_speedtest_on_target(target_name: str) -> dict:
         except Exception as e:
             return {'ok': False, 'log': f'SSH connect failed: {e}'}
         try:
-            # If already installed
+
             rc, out, err = _ssh_exec(ssh, 'command -v speedtest || command -v speedtest-cli || echo "NO"')
             if 'speedtest' in out or 'speedtest-cli' in out:
                 log_lines.append('Found existing speedtest binary: ' + out.strip())
@@ -533,12 +533,12 @@ async def auto_install_speedtest_on_target(target_name: str) -> dict:
                 else:
                     log_lines.append('Different Ookla speedtest version detected; reinstalling 1.2.0 via tarball.')
 
-            # Detect OS info
+
             rc, out, _ = _ssh_exec(ssh, 'cat /etc/os-release || uname -a')
             os_release = out.lower()
             log_lines.append('OS detection: ' + out.strip())
 
-            # Tarball install 1.2.0
+
             rc, arch_out, _ = _ssh_exec(ssh, 'uname -m || echo unknown')
             arch = (arch_out or '').strip()
             if arch in ('x86_64', 'amd64'):
@@ -561,7 +561,7 @@ async def auto_install_speedtest_on_target(target_name: str) -> dict:
                 rc, o, e = _ssh_exec(ssh, c)
                 log_lines.append(f'$ {c}\n{o}{e}'.strip())
 
-            # Verify
+
             rc, out, err = _ssh_exec(ssh, 'command -v speedtest || command -v speedtest-cli || echo "NO"')
             if 'NO' not in out:
                 rcv, ov, ev = _ssh_exec(ssh, 'speedtest --version 2>&1 || true')
@@ -572,7 +572,7 @@ async def auto_install_speedtest_on_target(target_name: str) -> dict:
                 else:
                     log_lines.append('Tarball install finished but version check did not return 1.2.0; continuing fallbacks.')
 
-            # Repo install fallbacks
+
             cmds_deb = [
                 'which sudo || true',
                 'export DEBIAN_FRONTEND=noninteractive',
@@ -601,7 +601,7 @@ async def auto_install_speedtest_on_target(target_name: str) -> dict:
                     log_lines.append(('$ speedtest --accept-license --accept-gdpr --version\n' + (o2 + e2)).strip())
                 return {'ok': True, 'log': '\n'.join(log_lines)}
 
-            # Pip fallback
+
             pip_try = [
                 'command -v python3 || command -v python || echo NO',
                 'command -v pip3 || command -v pip || (apt-get update -y && apt-get install -y python3-pip) || (yum -y install python3-pip || dnf -y install python3-pip) || true',

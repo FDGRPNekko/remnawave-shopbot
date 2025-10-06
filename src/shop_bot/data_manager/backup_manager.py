@@ -12,11 +12,11 @@ from . import remnawave_repository as rw_repo
 
 logger = logging.getLogger(__name__)
 
-# Папка для хранения локальных архивов бэкапов
+
 BACKUPS_DIR = Path("/app/project/backups")
 BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Имя файла БД см. в rw_repo.DB_FILE
+
 DB_FILE: Path = rw_repo.DB_FILE
 
 
@@ -37,16 +37,16 @@ def create_backup_file() -> Path | None:
         tmp_db_copy = BACKUPS_DIR / f"users-{ts}.db"
         zip_path = BACKUPS_DIR / f"db-backup-{ts}.zip"
 
-        # Безопасное резервное копирование через SQLite backup API
+
         with sqlite3.connect(DB_FILE) as src:
             with sqlite3.connect(tmp_db_copy) as dst:
                 src.backup(dst)
 
-        # Упакуем в zip
+
         with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
             zf.write(tmp_db_copy, arcname=tmp_db_copy.name)
 
-        # Удалим временную копию .db
+
         try:
             tmp_db_copy.unlink(missing_ok=True)
         except Exception:
@@ -106,7 +106,7 @@ def validate_db_file(db_path: Path) -> bool:
     try:
         with sqlite3.connect(db_path) as conn:
             cur = conn.cursor()
-            # Проверим наличие таблиц, которые есть у нас всегда
+
             required_tables = {
                 'users', 'vpn_keys', 'transactions', 'bot_settings', 'xui_hosts'
             }
@@ -115,7 +115,7 @@ def validate_db_file(db_path: Path) -> bool:
             missing = required_tables - present
             if missing:
                 logger.warning(f"Восстановление: в загруженной БД отсутствуют таблицы: {missing}")
-            # Минимальная проверка: users и bot_settings должны быть
+
             return 'users' in present and 'bot_settings' in present
     except Exception as e:
         logger.error(f"Восстановление: ошибка валидации файла БД: {e}")
@@ -132,7 +132,7 @@ def restore_from_file(uploaded_path: Path) -> bool:
             logger.error(f"Восстановление: файл не найден: {uploaded_path}")
             return False
 
-        # Распакуем, если архив
+
         tmp_dir = BACKUPS_DIR / f"restore-{_timestamp()}"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         candidate_db: Path | None = None
@@ -149,19 +149,19 @@ def restore_from_file(uploaded_path: Path) -> bool:
                 logger.error(f"Восстановление: не удалось распаковать архив: {e}")
                 return False
         else:
-            # Ожидаем, что это .db
+
             candidate_db = uploaded_path
 
         if not candidate_db or not candidate_db.exists():
             logger.error("Восстановление: в переданном файле не найдено .db")
             return False
 
-        # Валидация
+
         if not validate_db_file(candidate_db):
             logger.error("Восстановление: файл БД не прошёл проверку")
             return False
 
-        # Бэкап текущей БД
+
         backup_before = BACKUPS_DIR / f"before-restore-{_timestamp()}.zip"
         cur_backup = create_backup_file()
         if cur_backup and cur_backup.exists():
@@ -170,12 +170,12 @@ def restore_from_file(uploaded_path: Path) -> bool:
             except Exception:
                 pass
 
-        # Атомарная замена: используем SQLite backup API в обратную сторону
+
         with sqlite3.connect(candidate_db) as src:
             with sqlite3.connect(DB_FILE) as dst:
                 src.backup(dst)
         
-        # Миграции на всякий случай
+
         try:
             rw_repo.run_migration()
         except Exception:

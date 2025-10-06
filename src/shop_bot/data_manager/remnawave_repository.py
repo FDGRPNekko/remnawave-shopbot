@@ -211,8 +211,8 @@ def delete_key_by_email(email: str) -> bool:
     return database.delete_key_by_email(email)
 
 
-# Legacy database forwarders (temporary during migration to fully abstract Remnawave repository).
-# These wrappers ensure the rest of the codebase interacts with the DB only through rw_repo.
+
+
 _LEGACY_FORWARDERS = (
     "add_support_message",
     "add_to_balance",
@@ -274,7 +274,7 @@ _LEGACY_FORWARDERS = (
     "get_user",
     "get_user_count",
     "get_user_keys",
-    # Users pagination and helpers
+
     "get_users_paginated",
     "get_keys_counts_for_users",
     "get_user_tickets",
@@ -303,13 +303,13 @@ _LEGACY_FORWARDERS = (
     "update_ticket_subject",
     "update_ticket_thread_info",
     "update_user_stats",
-    # SSH targets (speedtest-only, separate from hosts)
+
     "get_all_ssh_targets",
     "get_ssh_target",
     "create_ssh_target",
     "update_ssh_target_fields",
     "delete_ssh_target",
-    # Resource metrics
+
     "insert_resource_metric",
     "get_latest_resource_metric",
     "get_metrics_series",
@@ -325,7 +325,7 @@ __all__ = sorted(
 )
 
 
-# --- Gift tokens ---
+
 
 def create_gift_token(
     token: str,
@@ -466,7 +466,7 @@ def claim_gift_token(token: str, user_id: int, key_id: int | None = None) -> dic
             return None
 
 
-# --- Promo codes ---
+
 
 def create_promo_code(
     code: str,

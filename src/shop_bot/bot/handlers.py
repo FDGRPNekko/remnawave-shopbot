@@ -76,7 +76,7 @@ from shop_bot.modules import remnawave_api
 
 TELEGRAM_BOT_USERNAME = None
 PAYMENT_METHODS = None
-ADMIN_ID = None  # устаревшее: используйте is_admin()
+ADMIN_ID = None
 CRYPTO_BOT_TOKEN = get_setting("cryptobot_token")
 
 logger = logging.getLogger(__name__)
@@ -97,17 +97,17 @@ async def _create_heleket_payment_request(
       - Тело (минимум): { amount, currency, order_id }
       - Дополнительно: url_callback (наш вебхук), description (положим JSON метаданных)
     """
-    # Подготовим ключи и проверим настройки
+
     merchant_id = (get_setting("heleket_merchant_id") or "").strip()
     api_key = (get_setting("heleket_api_key") or "").strip()
     if not (merchant_id and api_key):
         logger.error("Heleket: не заданы merchant_id/api_key в настройках.")
         return None
 
-    # payment_id используем как order_id; параллельно сохраним pending по нему
+
     payment_id = str(uuid.uuid4())
 
-    # Соберём metadata, на которое полагается обработка оплаты
+
     metadata = {
         "user_id": int(user_id),
         "months": int(months or 0),
@@ -123,33 +123,33 @@ async def _create_heleket_payment_request(
         "promo_discount": state_data.get("promo_discount"),
     }
 
-    # Сохраняем pending — даже если вебхук вернёт полное описание, фолбэк не помешает
+
     try:
         create_payload_pending(payment_id, user_id, float(metadata["price"]), metadata)
     except Exception as e:
         logger.warning(f"Heleket: не удалось создать pending: {e}")
 
-    # Соберём тело запроса Heleket
+
     amount_str = f"{Decimal(str(price)).quantize(Decimal('0.01'))}"
     body: dict = {
         "amount": amount_str,
-        "currency": "RUB",  # оплачиваем в рублях; плательщик выберет криптовалюту на стороне Heleket
+        "currency": "RUB",
         "order_id": payment_id,
-        # Передаём метаданные строкой JSON — наш вебхук читает поле 'description'
+
         "description": json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
     }
-    # Вебхук для Heleket — если указан domain в настройках
+
     try:
         domain = (get_setting("domain") or "").strip()
     except Exception:
         domain = ""
     if domain:
-        # Ожидаемый путь вебхука уже реализован во Flask: '/heleket-webhook'
-        # Если domain без завершающего '/', добавим
+
+
         cb = f"{domain.rstrip('/')}/heleket-webhook"
         body["url_callback"] = cb
 
-    # Подпись запроса
+
     body_json = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
     base64_payload = base64.b64encode(body_json.encode()).decode()
     sign = hashlib.md5((base64_payload + api_key).encode()).hexdigest()
@@ -170,7 +170,7 @@ async def _create_heleket_payment_request(
                     logger.error(f"Heleket: HTTP {resp.status}: {text}")
                     return None
                 data = await resp.json(content_type=None)
-                # Успех: ожидаем state == 0 и presence of result.url
+
                 if isinstance(data, dict) and data.get("state") == 0:
                     try:
                         result = data.get("result") or {}
@@ -206,8 +206,8 @@ async def _create_cryptobot_invoice(
         logger.error("CryptoBot: не указан токен API в настройках.")
         return None
 
-    # Собираем payload строго в формате, который парсит вебхук
-    # parts: user_id:months:price:action:key_id:host_name:plan_id:customer_email:payment_method[:promo_code:promo_discount]
+
+
     action = state_data.get("action")
     key_id = state_data.get("key_id")
     plan_id = state_data.get("plan_id")
@@ -216,7 +216,7 @@ async def _create_cryptobot_invoice(
     promo_code = state_data.get("promo_code")
     promo_discount = state_data.get("promo_discount")
 
-    # price в вебхуке строкой, оставим 2 знака после запятой
+
     price_str = f"{Decimal(str(price_rub)).quantize(Decimal('0.01'))}"
     parts = [
         str(int(user_id)),
@@ -229,7 +229,7 @@ async def _create_cryptobot_invoice(
         str(customer_email if customer_email is not None else "None"),
         pm,
     ]
-    # Добавим промо, если есть
+
     parts.append(str(promo_code if promo_code else "None"))
     try:
         promo_discount_str = f"{Decimal(str(promo_discount)).quantize(Decimal('0.01'))}" if promo_discount else "0"
@@ -243,8 +243,8 @@ async def _create_cryptobot_invoice(
         "currency_type": "fiat",
         "fiat": "RUB",
         "payload": payload_str,
-        # Не ограничиваем ассеты, пусть CryptoBot предложит доступные
-        # Можно добавить: accepted_assets=["USDT", "TON", ...]
+
+
     }
 
     headers = {
@@ -262,7 +262,7 @@ async def _create_cryptobot_invoice(
                     logger.error(f"CryptoBot: HTTP {resp.status}: {text}")
                     return None
                 data = await resp.json(content_type=None)
-                # Ответ Crypto Pay обычно: { ok: true, result: { invoice_id, bot_invoice_url, ... } }
+
                 if isinstance(data, dict) and data.get("ok") and isinstance(data.get("result"), dict):
                     res = data["result"]
                     pay_url = res.get("bot_invoice_url") or res.get("invoice_url")
@@ -275,10 +275,10 @@ async def _create_cryptobot_invoice(
         logger.error(f"CryptoBot: ошибка при создании инвойса: {e}", exc_info=True)
         return None
 
-    # payment_id используем как order_id; параллельно сохраним pending по нему
+
     payment_id = str(uuid.uuid4())
 
-    # Соберём metadata, на которое полагается обработка оплаты
+
     metadata = {
         "user_id": int(user_id),
         "months": int(months or 0),
@@ -292,33 +292,33 @@ async def _create_cryptobot_invoice(
         "payment_id": payment_id,
     }
 
-    # Сохраняем pending — даже если вебхук вернёт полное описание, фолбэк не помешает
+
     try:
         create_payload_pending(payment_id, user_id, float(metadata["price"]), metadata)
     except Exception as e:
         logger.warning(f"Heleket: не удалось создать pending: {e}")
 
-    # Соберём тело запроса Heleket
+
     amount_str = f"{Decimal(str(price)).quantize(Decimal('0.01'))}"
     body: dict = {
         "amount": amount_str,
-        "currency": "RUB",  # оплачиваем в рублях; плательщик выберет криптовалюту на стороне Heleket
+        "currency": "RUB",
         "order_id": payment_id,
-        # Передаём метаданные строкой JSON — наш вебхук читает поле 'description'
+
         "description": json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
     }
-    # Вебхук для Heleket — если указан domain в настройках
+
     try:
         domain = (get_setting("domain") or "").strip()
     except Exception:
         domain = ""
     if domain:
-        # Ожидаемый путь вебхука уже реализован во Flask: '/heleket-webhook'
-        # Если domain без завершающего '/', добавим
+
+
         cb = f"{domain.rstrip('/')}/heleket-webhook"
         body["url_callback"] = cb
 
-    # Подпись запроса
+
     body_json = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
     base64_payload = base64.b64encode(body_json.encode()).decode()
     sign = hashlib.md5((base64_payload + api_key).encode()).hexdigest()
@@ -339,7 +339,7 @@ async def _create_cryptobot_invoice(
                     logger.error(f"Heleket: HTTP {resp.status}: {text}")
                     return None
                 data = await resp.json(content_type=None)
-                # Успех: ожидаем state == 0 и presence of result.url
+
                 if isinstance(data, dict) and data.get("state") == 0:
                     try:
                         result = data.get("result") or {}
@@ -389,17 +389,17 @@ async def show_main_menu(message: types.Message, edit_message: bool = False):
     trial_available = not (user_db_data and user_db_data.get('trial_used'))
     is_admin_flag = is_admin(user_id)
     
-    # Отладочная информация (убрано для уменьшения логов)
 
-    # Текст главного меню — можно настроить в панели (bot_settings.main_menu_text)
+
+
     text = get_setting("main_menu_text") or "🏠 <b>Главное меню</b>\n\nВыберите действие:"
-    # Используем динамическую клавиатуру, если доступна, иначе fallback к статической
+
     try:
         keyboard = keyboards.create_dynamic_main_menu_keyboard(user_keys, trial_available, is_admin_flag)
     except Exception as e:
         logger.warning(f"Failed to create dynamic keyboard, using static: {e}")
         keyboard = keyboards.create_main_menu_keyboard(user_keys, trial_available, is_admin_flag)
-    # Отправляем только текст без фотографии
+
     if edit_message:
         try:
             await message.edit_text(text, reply_markup=keyboard)
@@ -469,7 +469,7 @@ def get_user_router() -> Router:
         username = message.from_user.username or message.from_user.full_name
         user_data = get_user(user_id)
 
-        # Бонус при старте для пригласившего (fixed_start_referrer): единоразово, когда новый пользователь запускает бота по реферальной ссылке
+
         try:
             reward_type = (get_setting("referral_reward_type") or "percent_purchase").strip()
         except Exception:
@@ -486,17 +486,17 @@ def get_user_router() -> Router:
                 except Exception as e:
                     logger.warning(f"Referral start bonus: add_to_balance failed for referrer {referrer_id}: {e}")
                     ok = False
-                # Увеличиваем суммарный заработок по рефералке
+
                 try:
                     add_to_referral_balance_all(int(referrer_id), float(start_bonus))
                 except Exception as e:
                     logger.warning(f"Referral start bonus: failed to increment referral_balance_all for {referrer_id}: {e}")
-                # Помечаем, что для этого нового пользователя старт уже обработан, чтобы не дублировать при повторном /start
+
                 try:
                     set_referral_start_bonus_received(user_id)
                 except Exception:
                     pass
-                # Уведомим пригласившего
+
                 try:
                     await bot.send_message(
                         chat_id=int(referrer_id),
@@ -631,13 +631,13 @@ def get_user_router() -> Router:
         elif user_keys: vpn_status_text = VPN_INACTIVE_TEXT
         else: vpn_status_text = VPN_NO_DATA_TEXT
         final_text = get_profile_text(username, total_spent, total_months, vpn_status_text)
-        # Баланс: основной + реферальные метрики
+
         try:
             main_balance = get_balance(user_id)
         except Exception:
             main_balance = 0.0
         final_text += f"\n\n💼 <b>Основной баланс:</b> {main_balance:.0f} RUB"
-        # Реферальная информация
+
         try:
             referral_count = get_referral_count(user_id)
         except Exception:
@@ -701,7 +701,7 @@ def get_user_router() -> Router:
         price_float_for_metadata = float(amount)
 
         try:
-            # Сформируем чек, если указан email для чеков
+
             customer_email = get_setting("receipt_email")
             receipt = None
             if customer_email and is_valid_email(customer_email):
@@ -742,7 +742,7 @@ def get_user_router() -> Router:
             await callback.message.answer("Не удалось создать ссылку на оплату.")
             await state.clear()
 
-    # --- Telegram Stars (XTR) ---
+
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_stars")
     async def create_stars_invoice_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Готовлю счёт в Telegram Stars...")
@@ -753,7 +753,7 @@ def get_user_router() -> Router:
             await state.clear()
             return
         user_id = callback.from_user.id
-        # Итого к оплате
+
         price_rub = Decimal(str(data.get('final_price', plan['price'])))
         try:
             stars_ratio_raw = get_setting("stars_per_rub") or '0'
@@ -764,7 +764,7 @@ def get_user_router() -> Router:
             await callback.message.edit_text("❌ Оплата в Stars временно недоступна.")
             await state.clear()
             return
-        # Кол-во звёзд — целое число
+
         stars_amount = int((price_rub * stars_ratio).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
         if stars_amount <= 0:
             stars_amount = 1
@@ -853,7 +853,7 @@ def get_user_router() -> Router:
             await callback.message.edit_text("❌ Не удалось создать счёт в Stars.")
             await state.clear()
 
-    # Пре-чек Stars: подтверждаем все инвойсы
+
     @user_router.pre_checkout_query()
     async def pre_checkout_handler(pre_checkout_q: PreCheckoutQuery):
         try:
@@ -861,7 +861,7 @@ def get_user_router() -> Router:
         except Exception:
             pass
 
-    # Успешная оплата Stars: обрабатываем payload как payment_id
+
     @user_router.message(F.successful_payment)
     async def stars_success_handler(message: types.Message, bot: Bot):
         try:
@@ -873,7 +873,7 @@ def get_user_router() -> Router:
         metadata = find_and_complete_pending_transaction(payload)
         if not metadata:
             logger.warning(f"Stars payment: metadata not found for payload {payload}")
-            # Fallback: try latest pending for this user (in case payload mismatch)
+
             try:
                 fallback = get_latest_pending_for_user(message.from_user.id)
             except Exception as e:
@@ -884,7 +884,7 @@ def get_user_router() -> Router:
                 logger.info(f"Stars payment: using fallback pending for user {message.from_user.id}, pid={pid}")
                 metadata = find_and_complete_pending_transaction(pid)
         if not metadata:
-            # Last resort: reconstruct top_up from successful_payment total_amount using stars_per_rub
+
             try:
                 total_stars = int(getattr(message.successful_payment, 'total_amount', 0) or 0)
             except Exception:
@@ -905,10 +905,10 @@ def get_user_router() -> Router:
                 }
                 logger.info(f"Stars payment: reconstructing top_up from total_stars={total_stars}, ratio={stars_ratio}, amount_rub={amount_rub}")
             else:
-                # still nothing — stop
+
                 logger.warning("Stars payment: cannot reconstruct payment metadata; skipping")
                 return
-        # Enrich metadata with current tg username if available for logging
+
         try:
             if message.from_user and message.from_user.username:
                 metadata.setdefault('tg_username', message.from_user.username)
@@ -916,19 +916,19 @@ def get_user_router() -> Router:
             pass
         await process_successful_payment(bot, metadata)
 
-    # --- YooMoney ---
+
     def _build_yoomoney_link(receiver: str, amount_rub: Decimal, label: str) -> str:
         base = "https://yoomoney.ru/quickpay/confirm.xml"
         params = {
             "receiver": (receiver or "").strip(),
-            "quickpay-form": "donate",  # P2P форма для перевода на кошелек
+            "quickpay-form": "donate",
             "targets": "Оплата подписки",
             "formcomment": "Оплата подписки",
             "short-dest": "Оплата подписки",
             "sum": f"{amount_rub:.2f}",
             "label": label,
             "successURL": f"https://t.me/{TELEGRAM_BOT_USERNAME}",
-            # Не фиксируем paymentType, чтобы YooMoney сам предложил доступные способы (исключает ошибки у некоторых кошельков)
+
         }
         url = base + "?" + urlencode(params)
         return url
@@ -948,7 +948,7 @@ def get_user_router() -> Router:
             await callback.message.edit_text("❌ YooMoney временно недоступен.")
             await state.clear()
             return
-        # Валидация кошелька (обычно начинается с 410 и состоит из цифр)
+
         w = (wallet or "").strip()
         if not (w.isdigit() and len(w) >= 11):
             await callback.message.edit_text("❌ Некорректный номер кошелька YooMoney. Проверьте в панели настроек.")
@@ -1052,7 +1052,7 @@ def get_user_router() -> Router:
             await callback.answer("✅ Оплата получена! Профиль/баланс скоро обновится.", show_alert=True)
             return
 
-        # Если ещё pending — попробуем проверить через OAuth operation-history по метке
+
         token = (get_setting('yoomoney_api_token') or '').strip()
         if not token:
             logger.warning(f"⚠️ Нет токена API ЮMoney для платежа {pid}")
@@ -1114,7 +1114,7 @@ def get_user_router() -> Router:
                     logger.error(f"💥 Ошибка в process_successful_payment: {e}")
             await callback.answer("✅ Оплата получена! Профиль/баланс скоро обновится.", show_alert=True)
             return
-        # Иначе
+
         logger.info(f"⏳ Платеж не найден или еще не оплачен: {pid}")
         await callback.answer("⏳ Оплата ещё не поступила. Попробуйте через минуту.", show_alert=True)
     @user_router.callback_query(TopUpProcess.waiting_for_topup_method, F.data == "topup_pay_heleket")
@@ -1127,7 +1127,7 @@ def get_user_router() -> Router:
             await callback.message.edit_text("❌ Некорректная сумма пополнения. Повторите ввод.")
             await state.clear()
             return
-        # Сформируем state_data минимально необходимым
+
         state_data = {
             "action": "top_up",
             "customer_email": None,
@@ -1307,7 +1307,7 @@ def get_user_router() -> Router:
             disable_web_page_preview=True
         )
 
-    # --- User: Просмотр последних результатов Speedtest (SSH-цели) ---
+
     @user_router.callback_query(F.data == "user_speedtest_last")
     @registration_required
     async def user_speedtest_last_handler(callback: types.CallbackQuery):
@@ -1340,11 +1340,11 @@ def get_user_router() -> Router:
             if ts_raw:
                 try:
                     dt = datetime.fromisoformat(str(ts_raw).replace('Z', '+00:00'))
-                    # Только день и время (без года), например: 22.09 14:35
+
                     ts_s = dt.strftime('%d.%m %H:%M')
                 except Exception:
                     ts_s = str(ts_raw)
-            # Красивый и короткий вывод: только задержка, скорости и время
+
             lines.append(
                 f"• <b>{name}</b> — SSH: {ok_badge} · ⏱ {ping_s} ms · ↓ {down_s} Mbps · ↑ {up_s} Mbps · 🕒 {ts_s}"
             )
@@ -1530,7 +1530,7 @@ def get_user_router() -> Router:
             user_id = int(ticket.get('user_id'))
             if message.from_user and message.from_user.id == me.id:
                 return
-            # Проверка многоадминная
+
             is_admin_by_setting = is_admin(message.from_user.id)
             is_admin_in_chat = False
             try:
@@ -1620,7 +1620,7 @@ def get_user_router() -> Router:
         await message.edit_text(f"Отлично! Создаю для вас бесплатный ключ на {get_setting('trial_duration_days')} дня на сервере \"{host_name}\"...")
 
         try:
-            # email: trial_{username}@bot.local с авто-суффиксом при коллизиях
+
             user_data = get_user(user_id) or {}
             raw_username = (user_data.get('username') or f'user{user_id}').lower()
             username_slug = re.sub(r"[^a-z0-9._-]", "_", raw_username).strip("_")[:16] or f"user{user_id}"
@@ -1760,12 +1760,12 @@ def get_user_router() -> Router:
             await callback.answer("Это уже текущий сервер.", show_alert=True)
             return
 
-        # Точное сохранение срока действия при переносе (без увеличения времени)
+
         try:
             expiry_dt = datetime.fromisoformat(key_data['expiry_date'])
             expiry_timestamp_ms_exact = int(expiry_dt.timestamp() * 1000)
         except Exception:
-            # Fallback: хотя бы 1 день, если дата в БД повреждена
+
             now_dt = datetime.now()
             expiry_timestamp_ms_exact = int((now_dt + timedelta(days=1)).timestamp() * 1000)
 
@@ -1775,7 +1775,7 @@ def get_user_router() -> Router:
 
         email = key_data.get('key_email')
         try:
-            # Передаём точный expiry_timestamp_ms, чтобы не увеличивать срок на панели при переносе
+
             result = await remnawave_api.create_or_update_key_on_host(
                 new_host_name,
                 email,
@@ -1788,13 +1788,13 @@ def get_user_router() -> Router:
                 )
                 return
 
-            # Сначала удаляем на старом сервере, пока локально сохранен старый UUID по email
+
             try:
                 await remnawave_api.delete_client_on_host(old_host, email)
             except Exception:
                 pass
 
-            # Затем обновляем локальную БД новым хостом и UUID
+
             update_key_host_and_info(
                 key_id=key_id,
                 new_host_name=new_host_name,
@@ -1802,7 +1802,7 @@ def get_user_router() -> Router:
                 new_expiry_ms=result['expiry_timestamp_ms']
             )
 
-            # Показываем сразу обновлённые данные ключа
+
             try:
                 updated_key = rw_repo.get_key_by_id(key_id)
                 details = await remnawave_api.get_key_details_from_host(updated_key)
@@ -1818,7 +1818,7 @@ def get_user_router() -> Router:
                         reply_markup=keyboards.create_key_info_keyboard(key_id)
                     )
                 else:
-                    # Fallback: показать сообщение об успехе
+
                     await callback.message.edit_text(
                         f"✅ Готово! Ключ перенесён на сервер \"{new_host_name}\".\n"
                         "Обновите подписку/конфиг в клиенте, если требуется.",
@@ -2126,7 +2126,7 @@ def get_user_router() -> Router:
         await state.clear()
         action = (data.get('action') or '').strip()
 
-        # Re-open the plans list depending on action
+
         if action == 'new':
             host_name = data.get('host_name') or ''
             if not host_name:
@@ -2181,7 +2181,7 @@ def get_user_router() -> Router:
             )
             return
 
-        # Fallback
+
         await back_to_main_menu_handler(callback)
 
     @user_router.message(PaymentProcess.waiting_for_email)
@@ -2190,7 +2190,7 @@ def get_user_router() -> Router:
             await state.update_data(customer_email=message.text)
             await message.answer(f"✅ Email принят: {message.text}")
 
-            # Показываем опции оплаты с учетом балансов и цены
+
             await show_payment_options(message, state)
             logger.info(f"User {message.chat.id}: State set to waiting_for_payment_method via show_payment_options")
         else:
@@ -2201,7 +2201,7 @@ def get_user_router() -> Router:
         await callback.answer()
         await state.update_data(customer_email=None)
 
-        # Показываем опции оплаты с учетом балансов и цены
+
         await show_payment_options(callback.message, state)
         logger.info(f"User {callback.from_user.id}: State set to waiting_for_payment_method via show_payment_options")
 
@@ -2251,7 +2251,7 @@ def get_user_router() -> Router:
 
         await state.update_data(final_price=float(final_price))
 
-        # Получаем основной баланс для показа кнопки оплаты с баланса
+
         try:
             main_balance = get_balance(message.chat.id)
         except Exception:
@@ -2555,7 +2555,7 @@ def get_user_router() -> Router:
             await callback.message.answer("⏳ Не удалось проверить статус. Попробуйте позже.")
             return
 
-        # Разбираем результат: возможные варианты структуры
+
         invoices = []
         if isinstance(data, dict) and data.get("ok"):
             res = data.get("result")
@@ -2579,7 +2579,7 @@ def get_user_router() -> Router:
             await callback.message.answer("⚠️ Оплата получена, но отсутствует payload. Обратитесь в поддержку.")
             return
 
-        # Парсим payload по тому же формату, что и вебхук в app.py
+
         p = payload_string.split(":")
         if len(p) < 9:
             await callback.message.answer("⚠️ Оплата получена, но формат данных некорректен. Обратитесь в поддержку.")
@@ -2688,7 +2688,7 @@ def get_user_router() -> Router:
         months = int(plan['months'])
         price = float(data.get('final_price', plan['price']))
 
-        # Пытаемся списать средства с основного баланса
+
         if not deduct_from_balance(user_id, price):
             await callback.answer("Недостаточно средств на основном балансе.", show_alert=True)
             return
@@ -2731,7 +2731,7 @@ async def notify_admin_of_purchase(bot: Bot, metadata: dict):
         price = metadata.get('price')
         action = metadata.get('action')
         payment_method = metadata.get('payment_method') or 'Unknown'
-        # Локализация методов оплаты для уведомления админу
+
         payment_method_map = {
             'Balance': 'Баланс',
             'Card': 'Карта',
@@ -2823,7 +2823,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         price = float(metadata.get('price'))
         logger.info(f"📊 Детали платежа: действие={action}, пользователь={user_id}, сумма={price:.2f} RUB")
         
-        # Поля ниже нужны только для покупок ключей/продлений
+
         def _to_int(val, default=0):
             try:
                 if val in (None, '', 'None', 'null'):
@@ -2852,7 +2852,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         except TelegramBadRequest as e:
             logger.warning(f"Could not delete payment message: {e}")
 
-    # Спец-ветка: пополнение баланса
+
     if action == "top_up":
         logger.info(f"💰 Обрабатываем пополнение баланса для пользователя {user_id}: {float(price):.2f} RUB")
         ok = False
@@ -2866,9 +2866,9 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             logger.error(f"💥 Ошибка при пополнении баланса для пользователя {user_id}: {e}", exc_info=True)
             ok = False
         
-        # Лог транзакции
+
         try:
-            # Предпочитаем username из metadata (может быть актуальнее)
+
             log_username = (metadata.get('tg_username') or '').strip() if isinstance(metadata, dict) else ''
             if not log_username:
                 user_info = get_user(user_id)
@@ -2888,7 +2888,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         except Exception:
             pass
 
-        # Реферальное вознаграждение за пополнение баланса (только внешние оплаты)
+
         try:
             pm_for_ref = (payment_method or '').strip().lower()
             if pm_for_ref == 'balance':
@@ -2917,7 +2917,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                         except Exception:
                             reward = Decimal("50.00")
                     else:
-                        # percent_purchase
+
                         try:
                             percentage = Decimal(get_setting("referral_percentage") or "0")
                         except Exception:
@@ -2950,7 +2950,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         except Exception as e:
             logger.warning(f"Referral(top_up): unexpected error while processing reward for user {user_id}: {e}")
 
-        # Уведомление пользователя о результате пополнения
+
         try:
             current_balance = 0.0
             try:
@@ -2979,7 +2979,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         except Exception as e:
             logger.error(f"Failed to send top-up notification to user {user_id}: {e}")
         
-        # Админ-уведомление о пополнении (по возможности)
+
         try:
             admins = [u for u in (get_all_users() or []) if is_admin(u.get('telegram_id') or 0)]
             for a in admins:
@@ -2996,12 +2996,12 @@ async def process_successful_payment(bot: Bot, metadata: dict):
     )
     try:
         email = ""
-        # Цена нужна ниже вне зависимости от ветки
+
         price = float(metadata.get('price'))
         result = None
-        # Определяем email для операции и вызываем панель для обеих веток (new/extend)
+
         if action == "new":
-            # Сформируем email в формате {username}@bot.local с авто-суффиксом при коллизиях
+
             user_data = get_user(user_id) or {}
             raw_username = (user_data.get('username') or f'user{user_id}').lower()
             username_slug = re.sub(r"[^a-z0-9._-]", "_", raw_username).strip("_")[:16] or f"user{user_id}"
@@ -3019,7 +3019,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                     candidate_email = f"{candidate_local}@bot.local"
                     break
         else:
-            # Продление существующего ключа — достаём email по key_id
+
             existing_key = rw_repo.get_key_by_id(key_id)
             if not existing_key or not existing_key.get('key_email'):
                 await processing_message.edit_text("❌ Не удалось найти ключ для продления.")
@@ -3053,7 +3053,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                 await processing_message.edit_text("❌ Не удалось обновить информацию о ключе. Попробуйте позже.")
                 return
 
-        # Начисляем реферальное вознаграждение по покупке — для любых внешних оплат (new и extend), кроме оплат с внутреннего баланса
+
         try:
             pm_for_ref = (payment_method or '').strip().lower()
             if pm_for_ref == 'balance':
@@ -3068,7 +3068,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                         logger.warning(f"Referral: invalid referrer_id={referrer_id} for user {user_id}")
                         referrer_id = None
                 if referrer_id:
-                    # Выбор логики по типу: процент от покупки, фикс за покупку; для fixed_start_referrer — вознаграждение по покупкам не начисляем
+
                     try:
                         reward_type = (get_setting("referral_reward_type") or "percent_purchase").strip()
                     except Exception:
@@ -3083,7 +3083,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                         except Exception:
                             reward = Decimal("50.00")
                     else:
-                        # percent_purchase (по умолчанию)
+
                         try:
                             percentage = Decimal(get_setting("referral_percentage") or "0")
                         except Exception:
@@ -3116,7 +3116,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         except Exception as e:
             logger.warning(f"Referral: unexpected error while processing reward for user {user_id}: {e}")
 
-        # Не считаем покупки, оплаченные с внутреннего баланса, в "Потрачено всего"
+
         pm = (payment_method or '').strip().lower()
         spent_for_stats = 0.0 if pm == 'balance' else price
         update_user_stats(user_id, spent_for_stats, months)
@@ -3135,7 +3135,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             "customer_email": metadata.get('customer_email')
         })
 
-        # Определяем payment_id для лога: берём из metadata, если есть (например, при отложенных транзакциях), иначе генерируем новый UUID
+
         payment_id_for_log = metadata.get('payment_id') or str(uuid.uuid4())
 
         log_transaction(
