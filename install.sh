@@ -115,8 +115,16 @@ ensure_packages() {
         fi
     done
     if ((${#missing[@]})); then
+        # Настройка debconf для неинтерактивной установки
+        export DEBIAN_FRONTEND=noninteractive
+        export DEBCONF_NONINTERACTIVE_SEEN=true
+        
         sudo apt-get update
-        sudo apt-get install -y "${missing[@]}"
+        sudo apt-get install -y --no-install-recommends "${missing[@]}"
+        
+        # Сброс переменных после установки
+        unset DEBIAN_FRONTEND
+        unset DEBCONF_NONINTERACTIVE_SEEN
     else
         log_info "Все необходимые пакеты уже присутствуют."
     fi
@@ -151,21 +159,39 @@ ensure_certbot_nginx() {
 
     if command -v apt-get >/dev/null 2>&1; then
         log_info "Устанавливаю плагин python3-certbot-nginx (apt)..."
+        # Настройка debconf для неинтерактивной установки
+        export DEBIAN_FRONTEND=noninteractive
+        export DEBCONF_NONINTERACTIVE_SEEN=true
+        
         sudo apt-get update
-        if sudo apt-get install -y python3-certbot-nginx; then
+        if sudo apt-get install -y --no-install-recommends python3-certbot-nginx; then
             if certbot plugins 2>/dev/null | grep -qi 'nginx'; then
                 log_success "✔ Плагин nginx для Certbot установлен (apt)."
+                unset DEBIAN_FRONTEND
+                unset DEBCONF_NONINTERACTIVE_SEEN
                 return
             fi
         else
             log_warn "Не удалось установить python3-certbot-nginx через apt."
         fi
+        
+        # Сброс переменных
+        unset DEBIAN_FRONTEND
+        unset DEBCONF_NONINTERACTIVE_SEEN
     fi
 
     log_warn "Пробую установить Certbot (snap) с поддержкой nginx."
     if ! command -v snap >/dev/null 2>&1; then
+        # Настройка debconf для неинтерактивной установки
+        export DEBIAN_FRONTEND=noninteractive
+        export DEBCONF_NONINTERACTIVE_SEEN=true
+        
         sudo apt-get update
-        sudo apt-get install -y snapd
+        sudo apt-get install -y --no-install-recommends snapd
+        
+        # Сброс переменных
+        unset DEBIAN_FRONTEND
+        unset DEBCONF_NONINTERACTIVE_SEEN
     fi
     sudo snap install core || true
     sudo snap refresh core || true
