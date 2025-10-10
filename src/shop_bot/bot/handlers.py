@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from hmac import compare_digest
 from functools import wraps
 from io import BytesIO
-from yookassa import Payment
+from yookassa import Payment, Configuration
 from datetime import datetime, timedelta
 from aiosend import CryptoPay, TESTNET
 from decimal import Decimal, ROUND_HALF_UP
@@ -690,6 +690,19 @@ def get_user_router() -> Router:
     @user_router.callback_query(TopUpProcess.waiting_for_topup_method, F.data == "topup_pay_yookassa")
     async def topup_pay_yookassa(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Создаю ссылку на оплату...")
+        
+        # Ensure YooKassa configuration is set
+        yookassa_shop_id = get_setting("yookassa_shop_id")
+        yookassa_secret_key = get_setting("yookassa_secret_key")
+        
+        if not yookassa_shop_id or not yookassa_secret_key:
+            await callback.message.answer("❌ YooKassa не настроен. Обратитесь к администратору.")
+            await state.clear()
+            return
+            
+        Configuration.account_id = yookassa_shop_id
+        Configuration.secret_key = yookassa_secret_key
+        
         data = await state.get_data()
         amount = Decimal(str(data.get('topup_amount', 0)))
         if amount <= 0:
@@ -2348,6 +2361,18 @@ def get_user_router() -> Router:
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_yookassa")
     async def create_yookassa_payment_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Создаю ссылку на оплату...")
+        
+        # Ensure YooKassa configuration is set
+        yookassa_shop_id = get_setting("yookassa_shop_id")
+        yookassa_secret_key = get_setting("yookassa_secret_key")
+        
+        if not yookassa_shop_id or not yookassa_secret_key:
+            await callback.message.answer("❌ YooKassa не настроен. Обратитесь к администратору.")
+            await state.clear()
+            return
+            
+        Configuration.account_id = yookassa_shop_id
+        Configuration.secret_key = yookassa_secret_key
         
         data = await state.get_data()
         user_data = get_user(callback.from_user.id)
