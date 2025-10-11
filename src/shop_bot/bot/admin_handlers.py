@@ -128,7 +128,7 @@ def get_admin_router() -> Router:
         try:
             keyboard = keyboards.create_dynamic_admin_menu_keyboard()
         except Exception as e:
-            logger.warning(f"Failed to create dynamic admin keyboard, using static: {e}")
+            logger.warning(f"Не удалось создать динамическую админ-клавиатуру, используем статическую: {e}")
             keyboard = keyboards.create_admin_menu_keyboard()
         if edit_message:
             try:
@@ -1666,7 +1666,7 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
             )
         except Exception as e:
-            logger.debug(f"edit_text failed in delete cancel for key #{key_id}: {e}")
+            logger.debug(f"edit_text не удался в отмене удаления для ключа #{key_id}: {e}")
             await callback.message.answer(
                 text,
                 reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
@@ -1680,7 +1680,7 @@ def get_admin_router() -> Router:
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
-        logger.info(f"admin_key_delete_prompt received: data='{callback.data}' from {callback.from_user.id}")
+        logger.info(f"Получен запрос на удаление ключа: data='{callback.data}' от {callback.from_user.id}")
         try:
             key_id = int(callback.data.split("_")[-1])
         except Exception:
@@ -1698,7 +1698,7 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_delete_key_confirm_keyboard(key_id)
             )
         except Exception as e:
-            logger.debug(f"edit_text failed in delete prompt for key #{key_id}: {e}")
+            logger.debug(f"edit_text не удался в запросе удаления для ключа #{key_id}: {e}")
             await callback.message.answer(
                 f"Вы уверены, что хотите удалить ключ #{key_id}?\nEmail: {email}\nСервер: {host}",
                 reply_markup=keyboards.create_admin_delete_key_confirm_keyboard(key_id)
@@ -1759,7 +1759,7 @@ def get_admin_router() -> Router:
         try:
             resp = await create_or_update_key_on_host(host, email, days_to_add=days)
         except Exception as e:
-            logger.error(f"Admin key extend: host update failed for key #{key_id}: {e}")
+            logger.error(f"Продление ключа админом: не удалось обновить хост для ключа #{key_id}: {e}")
             resp = None
         if not resp or not resp.get('client_uuid') or not resp.get('expiry_timestamp_ms'):
             await message.answer("❌ Не удалось продлить ключ на сервере")
@@ -1960,7 +1960,7 @@ def get_admin_router() -> Router:
             await callback.answer("Отменено")
         except Exception:
             pass
-        logger.info(f"admin_key_delete_cancel received: data='{callback.data}' from {callback.from_user.id}")
+        logger.info(f"Получена отмена удаления ключа: data='{callback.data}' от {callback.from_user.id}")
         try:
             key_id = int(callback.data.split("_")[-1])
         except Exception:
@@ -1980,7 +1980,7 @@ def get_admin_router() -> Router:
                 reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
             )
         except Exception as e:
-            logger.debug(f"edit_text failed in delete cancel for key #{key_id}: {e}")
+            logger.debug(f"edit_text не удался в отмене удаления для ключа #{key_id}: {e}")
             await callback.message.answer(
                 text,
                 reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
@@ -1996,7 +1996,7 @@ def get_admin_router() -> Router:
             await callback.answer("Удаляю…")
         except Exception:
             pass
-        logger.info(f"admin_key_delete_confirm received: data='{callback.data}' from {callback.from_user.id}")
+        logger.info(f"Получено подтверждение удаления ключа: data='{callback.data}' от {callback.from_user.id}")
         try:
             key_id = int(callback.data.split('_')[-1])
         except Exception:
@@ -2005,7 +2005,7 @@ def get_admin_router() -> Router:
         try:
             key = rw_repo.get_key_by_id(key_id)
         except Exception as e:
-            logger.error(f"DB get_key_by_id failed for #{key_id}: {e}")
+            logger.error(f"БД get_key_by_id не удался для #{key_id}: {e}")
             key = None
         if not key:
             await callback.message.answer("❌ Ключ не найден")
@@ -2013,7 +2013,7 @@ def get_admin_router() -> Router:
         try:
             user_id = int(key.get('user_id'))
         except Exception as e:
-            logger.error(f"Invalid user_id for key #{key_id}: {key.get('user_id')}, err={e}")
+            logger.error(f"Неверный user_id для ключа #{key_id}: {key.get('user_id')}, err={e}")
             await callback.message.answer("❌ Ошибка данных ключа: некорректный пользователь")
             return
         host = key.get('host_name')
@@ -2024,12 +2024,12 @@ def get_admin_router() -> Router:
                 ok_host = await delete_client_on_host(host, email)
             except Exception as e:
                 ok_host = False
-                logger.error(f"Failed to delete client on host '{host}' for key #{key_id}: {e}")
+                logger.error(f"Не удалось удалить клиента на хосте '{host}' для ключа #{key_id}: {e}")
         ok_db = False
         try:
             ok_db = delete_key_by_email(email)
         except Exception as e:
-            logger.error(f"Failed to delete key in DB for email '{email}': {e}")
+            logger.error(f"Не удалось удалить ключ в БД для email '{email}': {e}")
         if ok_db:
             await callback.message.answer("✅ Ключ удалён" + (" (с хоста тоже)" if ok_host else " (но удалить на хосте не удалось)"))
 
@@ -2040,7 +2040,7 @@ def get_admin_router() -> Router:
                     reply_markup=keyboards.create_admin_user_keys_keyboard(user_id, keys)
                 )
             except Exception as e:
-                logger.debug(f"edit_text failed in delete confirm list refresh for user {user_id}: {e}")
+                logger.debug(f"edit_text не удался в обновлении списка подтверждения удаления для пользователя {user_id}: {e}")
                 await callback.message.answer(
                     f"🔑 Ключи пользователя {user_id}:",
                     reply_markup=keyboards.create_admin_user_keys_keyboard(user_id, keys)
@@ -2728,7 +2728,7 @@ def get_admin_router() -> Router:
         try:
             resp = await create_or_update_key_on_host(host, email, days_to_add=days)
         except Exception as e:
-            logger.error(f"Extend flow: failed to update client on host '{host}' for key #{key_id}: {e}")
+            logger.error(f"Поток продления: не удалось обновить клиента на хосте '{host}' для ключа #{key_id}: {e}")
         if not resp or not resp.get('client_uuid') or not resp.get('expiry_timestamp_ms'):
             await message.answer("❌ Не удалось продлить ключ на сервере")
             return
@@ -2855,7 +2855,7 @@ def get_admin_router() -> Router:
         await state.clear()
 
         users = get_all_users()
-        logger.info(f"Broadcast: Starting to iterate over {len(users)} users.")
+        logger.info(f"Рассылка: Начинаем итерацию по {len(users)} пользователям.")
 
         sent_count = 0
         failed_count = 0
@@ -2877,7 +2877,7 @@ def get_admin_router() -> Router:
                 await asyncio.sleep(0.1)
             except Exception as e:
                 failed_count += 1
-                logger.warning(f"Failed to send broadcast message to user {user_id}: {e}")
+                logger.warning(f"Не удалось отправить сообщение рассылки пользователю {user_id}: {e}")
 
         await callback.message.answer(
             f"✅ Рассылка завершена!\n\n"

@@ -2463,7 +2463,7 @@ def find_and_complete_ton_transaction(payment_id: str, amount_ton: float) -> dic
             cursor.execute("SELECT * FROM transactions WHERE payment_id = ? AND status = 'pending'", (payment_id,))
             transaction = cursor.fetchone()
             if not transaction:
-                logger.warning(f"TON Webhook: Received payment for unknown or completed payment_id: {payment_id}")
+                logger.warning(f"TON Webhook: Получен платеж для неизвестного или уже обработанного payment_id: {payment_id}")
                 return None
             
             

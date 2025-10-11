@@ -211,7 +211,7 @@ async def _request_for_host(
             detail = response.json()
         except json.JSONDecodeError:
             detail = response.text
-        logger.warning("Remnawave API %s %s failed: %s", method, path, detail)
+        logger.warning("Remnawave API %s %s завершился ошибкой: %s", method, path, detail)
         raise RemnawaveAPIError(f"Remnawave API request failed: {response.status_code} {detail}")
 
     return response

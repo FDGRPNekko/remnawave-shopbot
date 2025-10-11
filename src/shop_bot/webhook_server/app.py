@@ -148,13 +148,13 @@ def create_webhook_app(bot_controller_instance):
         try:
             promo_info = rw_repo.redeem_promo_code(promo_code, user_id, applied_amount=applied_amount, order_id=order_id)
         except Exception as e:
-            logger.warning(f"Promo: redeem failed for code {promo_code}: {e}")
+            logger.warning(f"Промо: не удалось активировать код {promo_code}: {e}")
 
         if promo_info is None:
             try:
                 _, availability_error = rw_repo.check_promo_code_available(promo_code, user_id)
             except Exception as e:
-                logger.warning(f"Promo: failed to re-check availability for {promo_code}: {e}")
+                logger.warning(f"Промо: не удалось повторно проверить доступность для {promo_code}: {e}")
 
         should_deactivate = False
         user_limit_reached = False
@@ -184,7 +184,7 @@ def create_webhook_app(bot_controller_instance):
             try:
                 deact_ok = rw_repo.update_promo_code_status(promo_code, is_active=False)
             except Exception as e:
-                logger.warning(f"Promo: deactivate failed for code {promo_code}: {e}")
+                logger.warning(f"Промо: не удалось деактивировать код {promo_code}: {e}")
                 deact_ok = False
 
 
@@ -845,7 +845,7 @@ def create_webhook_app(bot_controller_instance):
                     tag='GIFT',
                 ))
             except Exception as e:
-                logger.error(f"gift key create: remnawave error: {e}")
+                logger.error(f"Создание подарочного ключа: ошибка remnawave: {e}")
                 result = None
             if not result:
                 return jsonify({"ok": False, "error": "host_failed"}), 500
@@ -1614,7 +1614,7 @@ def create_webhook_app(bot_controller_instance):
 
             return send_file(str(zip_path), as_attachment=True, download_name=os.path.basename(zip_path))
         except Exception as e:
-            logger.error(f"DB backup error: {e}")
+            logger.error(f"Ошибка резервного копирования БД: {e}")
             flash('Ошибка при создании бэкапа.', 'danger')
             return redirect(request.referrer or url_for('settings_page', tab='panel'))
 
@@ -1659,7 +1659,7 @@ def create_webhook_app(bot_controller_instance):
                 flash('Восстановление не удалось. Проверьте файл и повторите.', 'danger')
             return redirect(request.referrer or url_for('settings_page', tab='panel'))
         except Exception as e:
-            logger.error(f"DB restore error: {e}", exc_info=True)
+            logger.error(f"Ошибка восстановления БД: {e}", exc_info=True)
             flash('Ошибка при восстановлении БД.', 'danger')
             return redirect(request.referrer or url_for('settings_page', tab='panel'))
 

@@ -447,7 +447,7 @@ async def _maybe_collect_resource_metrics(bot: Bot | None):
             await _maybe_alert(bot, scope='local', name='panel', cpu=cpu_p, mem=mem_p, disk=disk_p,
                                cpu_thr=cpu_thr, mem_thr=mem_thr, disk_thr=disk_thr, cooldown_sec=cooldown)
         except Exception:
-            logger.debug("Scheduler: local metrics collection failed", exc_info=True)
+            logger.debug("Scheduler: не удалось собрать локальные метрики", exc_info=True)
 
 
         hosts = rw_repo.get_all_hosts() or []
@@ -473,7 +473,7 @@ async def _maybe_collect_resource_metrics(bot: Bot | None):
                 await _maybe_alert(bot, scope='host', name=name, cpu=None, mem=mem_p, disk=disk_p,
                                    cpu_thr=cpu_thr, mem_thr=mem_thr, disk_thr=disk_thr, cooldown_sec=cooldown)
             except Exception:
-                logger.debug("Scheduler: host metrics collection failed for %s", name, exc_info=True)
+                logger.debug("Scheduler: не удалось собрать метрики хоста для %s", name, exc_info=True)
 
         _last_resource_collect_at = now
     except Exception:

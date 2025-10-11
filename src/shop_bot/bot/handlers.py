@@ -397,7 +397,7 @@ async def show_main_menu(message: types.Message, edit_message: bool = False):
     try:
         keyboard = keyboards.create_dynamic_main_menu_keyboard(user_keys, trial_available, is_admin_flag)
     except Exception as e:
-        logger.warning(f"Failed to create dynamic keyboard, using static: {e}")
+        logger.warning(f"Не удалось создать динамическую клавиатуру, используем статическую: {e}")
         keyboard = keyboards.create_main_menu_keyboard(user_keys, trial_available, is_admin_flag)
 
     if edit_message:
@@ -414,7 +414,7 @@ async def process_successful_onboarding(callback: types.CallbackQuery, state: FS
     try:
         set_terms_agreed(user_id)
     except Exception as e:
-        logger.error(f"Failed to set_terms_agreed for user {user_id}: {e}")
+        logger.error(f"Не удалось установить согласие с условиями для пользователя {user_id}: {e}")
     try:
         await callback.answer()
     except Exception:
@@ -460,9 +460,9 @@ def get_user_router() -> Router:
                 potential_referrer_id = int(command.args.split('_')[1])
                 if potential_referrer_id != user_id:
                     referrer_id = potential_referrer_id
-                    logger.info(f"New user {user_id} was referred by {referrer_id}")
+                    logger.info(f"Новый пользователь {user_id} пришел по реферальной ссылке от {referrer_id}")
             except (IndexError, ValueError):
-                logger.warning(f"Invalid referral code received: {command.args}")
+                logger.warning(f"Получен неверный реферальный код: {command.args}")
                 
         register_user_if_not_exists(user_id, username, referrer_id)
         user_id = message.from_user.id
@@ -484,13 +484,13 @@ def get_user_router() -> Router:
                 try:
                     ok = add_to_balance(int(referrer_id), float(start_bonus))
                 except Exception as e:
-                    logger.warning(f"Referral start bonus: add_to_balance failed for referrer {referrer_id}: {e}")
+                    logger.warning(f"Реферальный стартовый бонус: не удалось добавить к балансу для реферера {referrer_id}: {e}")
                     ok = False
 
                 try:
                     add_to_referral_balance_all(int(referrer_id), float(start_bonus))
                 except Exception as e:
-                    logger.warning(f"Referral start bonus: failed to increment referral_balance_all for {referrer_id}: {e}")
+                    logger.warning(f"Реферальный стартовый бонус: не удалось увеличить referral_balance_all для {referrer_id}: {e}")
 
                 try:
                     set_referral_start_bonus_received(user_id)
@@ -751,7 +751,7 @@ def get_user_router() -> Router:
                 reply_markup=keyboards.create_payment_keyboard(payment.confirmation.confirmation_url)
             )
         except Exception as e:
-            logger.error(f"Failed to create YooKassa topup payment: {e}", exc_info=True)
+            logger.error(f"Не удалось создать платеж пополнения YooKassa: {e}", exc_info=True)
             await callback.message.answer("Не удалось создать ссылку на оплату.")
             await state.clear()
 
@@ -797,9 +797,9 @@ def get_user_router() -> Router:
         }
         try:
             ok = create_payload_pending(payment_id, user_id, float(price_rub), metadata)
-            logger.info(f"Stars pending created: ok={ok}, payment_id={payment_id}, user_id={user_id}, price_rub={price_rub}")
+            logger.info(f"Создано ожидание Stars: ok={ok}, payment_id={payment_id}, user_id={user_id}, price_rub={price_rub}")
         except Exception as e:
-            logger.error(f"Failed to create pending for Stars payment_id={payment_id}: {e}", exc_info=True)
+            logger.error(f"Не удалось создать ожидание для Stars payment_id={payment_id}: {e}", exc_info=True)
 
         title = f"Подписка на {int(plan['months'])} мес."
         description = f"Оплата VPN на {int(plan['months'])} мес."
@@ -813,7 +813,7 @@ def get_user_router() -> Router:
             )
             await state.clear()
         except Exception as e:
-            logger.error(f"Failed to create Stars invoice: {e}")
+            logger.error(f"Не удалось создать счет Stars: {e}")
             await callback.message.edit_text("❌ Не удалось создать счёт в Stars. Попробуйте другой способ оплаты.")
             await state.clear()
 
@@ -849,9 +849,9 @@ def get_user_router() -> Router:
         }
         try:
             ok = create_payload_pending(payment_id, user_id, float(amount_rub), metadata)
-            logger.info(f"Stars topup pending created: ok={ok}, payment_id={payment_id}, user_id={user_id}, amount_rub={amount_rub}")
+            logger.info(f"Создано ожидание пополнения Stars: ok={ok}, payment_id={payment_id}, user_id={user_id}, amount_rub={amount_rub}")
         except Exception as e:
-            logger.error(f"Failed to create pending for Stars topup payment_id={payment_id}: {e}", exc_info=True)
+            logger.error(f"Не удалось создать ожидание для пополнения Stars payment_id={payment_id}: {e}", exc_info=True)
         try:
             await callback.message.answer_invoice(
                 title="Пополнение баланса",
@@ -862,7 +862,7 @@ def get_user_router() -> Router:
             )
             await state.clear()
         except Exception as e:
-            logger.error(f"Failed to create Stars topup invoice: {e}")
+            logger.error(f"Не удалось создать счет пополнения Stars: {e}")
             await callback.message.edit_text("❌ Не удалось создать счёт в Stars.")
             await state.clear()
 
@@ -885,16 +885,16 @@ def get_user_router() -> Router:
             return
         metadata = find_and_complete_pending_transaction(payload)
         if not metadata:
-            logger.warning(f"Stars payment: metadata not found for payload {payload}")
+            logger.warning(f"Платеж Stars: метаданные не найдены для payload {payload}")
 
             try:
                 fallback = get_latest_pending_for_user(message.from_user.id)
             except Exception as e:
                 fallback = None
-                logger.error(f"Stars payment: fallback lookup failed for user {message.from_user.id}: {e}", exc_info=True)
+                logger.error(f"Платеж Stars: не удалось найти резервные данные для пользователя {message.from_user.id}: {e}", exc_info=True)
             if fallback and (fallback.get('payment_method') == 'Telegram Stars'):
                 pid = fallback.get('payment_id') or payload
-                logger.info(f"Stars payment: using fallback pending for user {message.from_user.id}, pid={pid}")
+                logger.info(f"Платеж Stars: используем резервные данные для пользователя {message.from_user.id}, pid={pid}")
                 metadata = find_and_complete_pending_transaction(pid)
         if not metadata:
 
@@ -916,10 +916,10 @@ def get_user_router() -> Router:
                     "payment_method": "Telegram Stars",
                     "payment_id": payload,
                 }
-                logger.info(f"Stars payment: reconstructing top_up from total_stars={total_stars}, ratio={stars_ratio}, amount_rub={amount_rub}")
+                logger.info(f"Платеж Stars: восстанавливаем пополнение из total_stars={total_stars}, ratio={stars_ratio}, amount_rub={amount_rub}")
             else:
 
-                logger.warning("Stars payment: cannot reconstruct payment metadata; skipping")
+                logger.warning("Платеж Stars: не удалось восстановить метаданные платежа; пропускаем")
                 return
 
         try:
