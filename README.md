@@ -8,22 +8,22 @@
     <a href="#-%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B0%D1%82%D1%8C-%D1%80%D0%B0%D0%B7%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D1%83">Поддержать проект</a>
   </p>
   <p align="center">
-    <a href="https://github.com/tweopi/remnawave-shopbot/releases" target="_blank">
+    <a href="https://github.com/FDGRPNekko/remnawave-shopbot/releases" target="_blank">
       <img alt="release" src="https://img.shields.io/github/v/release/tweopi/remnawave-shopbot?label=release&style=flat-square">
     </a>
-    <a href="https://github.com/tweopi/remnawave-shopbot/releases" target="_blank">
+    <a href="https://github.com/FDGRPNekko/remnawave-shopbot/releases" target="_blank">
       <img alt="downloads" src="https://img.shields.io/github/downloads/tweopi/remnawave-shopbot/total?label=downloads&style=flat-square">
     </a>
-    <a href="https://github.com/tweopi/remnawave-shopbot/blob/main/LICENSE" target="_blank">
+    <a href="https://github.com/FDGRPNekko/remnawave-shopbot/blob/main/LICENSE" target="_blank">
       <img alt="license" src="https://img.shields.io/github/license/tweopi/remnawave-shopbot?label=license&style=flat-square">
     </a>
-    <a href="https://github.com/tweopi/remnawave-shopbot/commits" target="_blank">
+    <a href="https://github.com/FDGRPNekko/remnawave-shopbot/commits" target="_blank">
       <img alt="last-commit" src="https://img.shields.io/github/last-commit/tweopi/remnawave-shopbot?label=last%20commit&style=flat-square">
     </a>
-    <a href="https://github.com/tweopi/remnawave-shopbot/issues" target="_blank">
+    <a href="https://github.com/FDGRPNekko/remnawave-shopbot/issues" target="_blank">
       <img alt="issues" src="https://img.shields.io/github/issues/tweopi/remnawave-shopbot?label=issues&style=flat-square">
     </a>
-    <a href="https://github.com/tweopi/remnawave-shopbot/stargazers" target="_blank">
+    <a href="https://github.com/FDGRPNekko/remnawave-shopbot/stargazers" target="_blank">
       <img alt="stars" src="https://img.shields.io/github/stars/tweopi/remnawave-shopbot?label=stars&style=flat-square">
     </a>
     <a href="https://www.python.org/downloads/" target="_blank">
@@ -129,7 +129,7 @@
 2) Выполните:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/tweopi/remnawave-shopbot/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/FDGRPNekko/remnawave-shopbot/main/install.sh | bash
 ```
 
 3) Следуйте инструкциям установщика:
