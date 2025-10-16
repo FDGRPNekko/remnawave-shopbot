@@ -228,12 +228,14 @@ async def sync_keys_with_panels():
                         )
             else:
                 logger.warning(
-                    "Scheduler: Ключ '%s' (host '%s') отсутствует в Remnawave. Помечаю к удалению в локальной БД.",
+                    "Scheduler: Ключ '%s' (host '%s') отсутствует в Remnawave. Помечаю к удалению в локальной БД (FreezeDev).",
                     raw_email,
                     host_name,
+                    
                 )
                 if rw_repo.update_key_status_from_server(raw_email, None):
-                    total_affected_records += 1
+                    #total_affected_records += 1
+                    continue
 
         if remote_by_email:
             for normalized_email, (remote_email, remote_user) in remote_by_email.items():
